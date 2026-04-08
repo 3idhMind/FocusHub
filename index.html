@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic 365 Days Horizontal Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/global.css">
+</head>
+<body>
+    <div class="dashboard-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="brand-section">
+                <div class="brand">FocusHub</div>
+                <button id="sidebar-toggle" class="sidebar-toggle" onclick="toggleSidebar()">
+                    <span class="toggle-icon">◀</span>
+                </button>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item" data-target="tool-dashboard">
+                    <span class="nav-icon">🏠</span> <span class="nav-text">Dashboard</span>
+                </a>
+                <a href="#" class="nav-item active" data-target="tool-365">
+                    <span class="nav-icon">📅</span> <span class="nav-text">365 Tracker</span>
+                </a>
+                <a href="#" class="nav-item" data-target="tool-syllabus">
+                    <span class="nav-icon">📚</span> <span class="nav-text">Syllabus</span>
+                </a>
+                <a href="#" class="nav-item" data-target="tool-notes">
+                    <span class="nav-icon">📝</span> <span class="nav-text">Notes</span>
+                </a>
+                <a href="#" class="nav-item" data-target="tool-trash">
+                    <span class="nav-icon">🗑️</span> <span class="nav-text">Trash</span>
+                </a>
+                <div class="nav-spacer" style="flex: 1;"></div>
+                <a href="#" class="nav-item profile-nav-item" data-target="tool-profile">
+                    <span class="nav-icon">👤</span> <span class="nav-text">Profile</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content Canvas -->
+        <main class="main-canvas">
+            <!-- Global Warning Banner (Guest Mode) - MOVED OUTSIDE app-canvas -->
+            <div id="guest-banner" class="guest-banner hidden">
+                <span>⚠️ You are in Guest Mode. Your focus streak and data will vanish if you close this tab.</span>
+                <button class="banner-auth-btn" onclick="auth.openAuthModal()">[Log In / Sign Up]</button>
+            </div>
+
+            <div id="app-canvas" class="app-canvas-container">
+                <!-- Features will be injected here by the router -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Contextual Action Popup for 365 Tracker -->
+    <div id="action-popup" class="context-menu hidden">
+        <div id="popup-header" class="popup-header">
+            <span id="popup-date" class="popup-date"></span>
+            <span id="popup-status" class="popup-status"></span>
+        </div>
+        <button class="popup-item btn-tick" onclick="window.tracker.updateStatus('completed')">
+            <span class="icon">✓</span> <span class="label">Tick</span>
+        </button>
+        <button class="popup-item btn-cross" onclick="window.tracker.updateStatus('skipped')">
+            <span class="icon">✗</span> <span class="label">Cross</span>
+        </button>
+        <button class="popup-item btn-clear" onclick="window.tracker.clearDay()">
+            <span class="icon">🗑️</span> <span class="label">Clear</span>
+        </button>
+        <div class="popup-divider"></div>
+        <div class="popup-note-section">
+            <span class="note-label">Note</span>
+            <div class="note-actions">
+                <button class="note-btn btn-add" onclick="window.tracker.openDiary()" title="Add/Edit Note">+</button>
+                <button class="note-btn btn-read" onclick="window.tracker.readNote()" title="Read Note">Read</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <button class="close-modal" onclick="auth.closeAuthModal()">&times;</button>
+            <div class="auth-header">
+                <h2 id="auth-title">Focus<br>Login</h2>
+                <p id="auth-subtitle">Log in to secure your progress and sync across devices.</p>
+            </div>
+            <div class="auth-body">
+                <!-- Main Login/Signup View -->
+                <div id="auth-main-view">
+                    <div class="auth-form">
+                        <div id="auth-name-fields" class="auth-row hidden">
+                            <input type="text" id="auth-first-name" placeholder="First Name">
+                            <input type="text" id="auth-last-name" placeholder="Last Name">
+                        </div>
+                        <input type="email" id="auth-email" placeholder="Email Address">
+                        <input type="password" id="auth-password" placeholder="Password">
+                        <input type="password" id="auth-confirm-password" placeholder="Confirm Password" class="hidden">
+                        
+                        <div id="auth-consent-container" class="auth-consent hidden">
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="auth-marketing-consent">
+                                <span class="checkmark"></span>
+                                <span class="consent-text">I agree to the Terms of Service & Privacy Policy, and I want to receive exclusive focus tips and product updates.</span>
+                            </label>
+                        </div>
+
+                        <div id="forgot-password-container" class="auth-extra">
+                            <a href="#" onclick="auth.showResetMode()">Forgot Password?</a>
+                        </div>
+                        <button id="auth-submit-btn" class="auth-primary-btn" onclick="auth.handleAuthSubmit()">Continue</button>
+                    </div>
+                    <div class="auth-footer">
+                        <p id="toggle-auth-text" class="toggle-auth">Don't have an account? <a href="#" onclick="auth.toggleAuthMode()">Sign Up</a></p>
+                    </div>
+                </div>
+
+                <!-- Reset Password View -->
+                <div id="reset-password-view" class="hidden">
+                    <div class="auth-form">
+                        <input type="email" id="reset-email" placeholder="Email Address">
+                        <button class="auth-primary-btn" onclick="auth.handlePasswordResetClick()">Send Reset Link</button>
+                    </div>
+                    <div class="auth-footer">
+                        <p class="toggle-auth"><a href="#" onclick="auth.showLoginMode()">Back to Login</a></p>
+                    </div>
+                </div>
+
+                <!-- Account Exists View -->
+                <div id="account-exists-view" class="hidden">
+                    <div class="auth-header" style="text-align: center; margin-bottom: 32px;">
+                        <h2 style="font-size: 1.8rem; margin-bottom: 12px;">Account Exists</h2>
+                        <p style="color: rgba(255,255,255,0.7); font-size: 0.95rem; line-height: 1.5;">This account has already been created with this email.</p>
+                        <p style="color: rgba(255,255,255,0.7); font-size: 0.95rem; line-height: 1.5;">Are you want to log in with this account?</p>
+                    </div>
+                    <div class="auth-form" style="gap: 12px;">
+                        <button class="auth-primary-btn" onclick="auth.switchToLoginFromExists()">Log in with this account</button>
+                        <button class="auth-secondary-btn" onclick="auth.switchToSignupFromExists()">Are you want to create a new account?</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fear of Loss Popup -->
+    <div id="fear-popup" class="modal-overlay hidden">
+        <div class="modal-content fear-content">
+            <div class="fear-header">
+                <span class="fear-icon">🚀</span>
+                <h2>Great job taking the first step!</h2>
+            </div>
+            <p>But wait... your progress isn't saved. Create an account now so you don't lose your streak when you leave.</p>
+            <div class="fear-actions">
+                <button class="auth-primary-btn" onclick="auth.openAuthModal('fear')">Secure My Progress</button>
+                <button class="text-btn" onclick="auth.closeFearPopup()">I'll take the risk</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diary Overlay -->
+    <div id="diary-modal" class="modal-overlay hidden">
+        <div class="modal-content diary-content">
+            <div class="diary-header">
+                <button class="back-btn" onclick="window.tracker.closeDiary()">← Back</button>
+                <h2 id="diary-modal-date-title">March 30, 2026</h2>
+                <button class="auth-primary-btn" onclick="window.tracker.saveDiaryNote()">Save Note</button>
+            </div>
+            <div class="diary-body">
+                <textarea id="diary-note-area" placeholder="Write your daily note here... What did you achieve? Any blockers? If you have multiple notes, add them on new lines."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Minimal Toast Notification -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script type="module" src="/app.js"></script>
+</body>
+</html>

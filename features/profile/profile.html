@@ -1,0 +1,52 @@
+<div class="tool-view active" id="tool-profile">
+    <div class="profile-container">
+        <div class="profile-header">
+            <div class="profile-avatar" id="profile-avatar-display">P</div>
+            <div class="profile-title">
+                <h1 id="profile-name-display">Guest User</h1>
+                <p id="profile-email-display">Not logged in</p>
+            </div>
+        </div>
+
+        <div class="profile-content">
+            <div class="profile-section">
+                <h2>Account Status</h2>
+                <div class="status-card">
+                    <div class="status-indicator" id="profile-status-dot"></div>
+                    <span id="profile-status-text">Guest Mode - Progress is not synced remotely</span>
+                </div>
+                
+                <!-- Display this only for guests -->
+                <div id="profile-guest-actions" class="profile-actions">
+                    <p>Log in to secure your progress and unlock cloud sync.</p>
+                    <button class="profile-primary-btn" onclick="auth.openAuthModal()">Create Account / Log In</button>
+                </div>
+            </div>
+
+            <!-- Display this only for logged in users -->
+            <div id="profile-user-actions" class="profile-section hidden">
+                <h2>Security</h2>
+                <div class="settings-list">
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <h3>Password</h3>
+                            <p>Update your password to keep your account secure</p>
+                        </div>
+                        <button class="profile-secondary-btn" onclick="auth.showResetMode(); auth.openAuthModal();">Reset</button>
+                    </div>
+                </div>
+
+                <h2>Danger Zone</h2>
+                <div class="settings-list danger-zone">
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <h3 class="danger-text">Sign Out</h3>
+                            <p>You will remain safe, but local unsynced edits will be cleared.</p>
+                        </div>
+                        <button class="profile-danger-btn" onclick="auth.handleLogout()">Log Out</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

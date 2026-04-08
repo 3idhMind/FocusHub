@@ -1,0 +1,5 @@
+{
+  "name": "Focus",
+  "description": "A dynamic 365-day horizontal tracker with local storage, prepared for Firebase integration.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,40 @@
+<section id="tool-trash" class="tool-view active">
+    <header class="app-header">
+        <h1 class="main-title">Recovery Center</h1>
+        <div class="subtitle-row">
+            <div class="col-left">
+                <span class="interactive-year">Trash</span>
+            </div>
+            <div class="col-center">
+                <span class="quote-muted">Nothing is truly lost until it's forgotten.</span>
+            </div>
+            <div class="col-right">
+                <span class="quote-right">Restore your progress<br>or clear the clutter.</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="trash-container">
+        <div id="trash-list" class="trash-list">
+            <div class="loading-state">Loading trash...</div>
+        </div>
+    </div>
+
+    <!-- Custom Confirmation Modal -->
+    <div id="trash-confirm-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Permanent Deletion</h3>
+                <button class="close-btn" onclick="window.trashModule.closeConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to permanently delete this log? This action cannot be undone.</p>
+                <p class="modal-warning">The item will be removed from your history forever.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="window.trashModule.closeConfirmModal()">Cancel</button>
+                <button id="confirm-delete-btn" class="btn-danger" onclick="window.trashModule.confirmDelete()">Delete Forever</button>
+            </div>
+        </div>
+    </div>
+</section>

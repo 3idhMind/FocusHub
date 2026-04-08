@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users_progress
+    // Document ID: {uid}
+    // Fields:
+    //   - logs: map (required) - A map of date strings (YYYY-MM-DD) to log objects
+    //     - status: string (optional, enum: ['completed', 'skipped', 'pending'])
+    //     - note: string (optional, max 500 chars)
+    //     - tasks: list (optional, max 50 items)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+             email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string &&
+             dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // Domain Validator for UserProgress
+    function isValidUserProgress(data) {
+      return data.keys().hasAll(['logs']) &&
+             data.logs is map;
+    }
+
+    // Domain Validator for User Profile
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['firstName', 'lastName', 'email', 'marketingConsent', 'updatedAt']) &&
+             data.firstName is string && data.firstName.size() > 0 && data.firstName.size() < 50 &&
+             data.lastName is string && data.lastName.size() > 0 && data.lastName.size() < 50 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.marketingConsent is bool &&
+             (!('updatedAt' in data) || isValidDateString(data.updatedAt));
+    }
+
+    // Domain Validator for Syllabus
+    function isValidSyllabus(data) {
+      return data.keys().hasAll(['subjects']) &&
+             data.subjects is list &&
+             data.subjects.size() <= 100; // Limit to 100 subjects
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "shivamrathor12344@gmail.com" && request.auth.token.email_verified == true)); // Default admin
+    }
+
+    // Allow users to read and write only their own progress data
+    match /users_progress/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      
+      // For create and update, we ensure the user is the owner and the data structure is valid
+      allow create: if isOwner(uid) && isValidUserProgress(request.resource.data);
+      
+      allow update: if isOwner(uid) && 
+                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['logs']) || 
+                     isValidUserProgress(request.resource.data));
+    }
+
+    // User Profile Rules
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) && isValidUser(request.resource.data);
+      allow update: if (isOwner(uid) && isValidUser(request.resource.data) && 
+                    request.resource.data.email == resource.data.email) || isAdmin(); // Email cannot be changed
+    }
+
+    // Syllabus Rules
+    match /users_syllabus/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid) && isValidSyllabus(request.resource.data);
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+    
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

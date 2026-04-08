@@ -1,0 +1,119 @@
+.syllabus-container {
+    padding: 30px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.syllabus-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 40px;
+}
+
+.syllabus-header h2 {
+    font-size: 2.4rem;
+    font-family: var(--font-serif);
+    color: var(--muted-gold);
+}
+
+.syllabus-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 25px;
+}
+
+.subject-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 25px;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.subject-card:hover {
+    transform: translateY(-5px);
+    border-color: rgba(198, 167, 94, 0.3);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.subject-info {
+    margin-bottom: 20px;
+}
+
+.subject-name {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 5px;
+}
+
+.subject-progress {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.subject-bar-bg {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.subject-bar-fill {
+    height: 100%;
+    background: var(--muted-gold);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.subject-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.subject-btn {
+    flex: 1;
+    padding: 8px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: transparent;
+    color: var(--text-main);
+}
+
+.btn-edit:hover {
+    background: rgba(198, 167, 94, 0.1);
+    color: var(--muted-gold);
+    border-color: var(--muted-gold);
+}
+
+.btn-delete:hover {
+    background: rgba(255, 102, 102, 0.1);
+    color: #ff6666;
+    border-color: #ff6666;
+}
+
+.syllabus-empty {
+    text-align: center;
+    padding: 80px 40px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 24px;
+    border: 2px dashed rgba(255, 255, 255, 0.05);
+}
+
+.syllabus-empty .icon {
+    font-size: 4rem;
+    margin-bottom: 20px;
+    display: block;
+}
+
+.syllabus-empty p {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 1.2rem;
+    margin-bottom: 30px;
+}

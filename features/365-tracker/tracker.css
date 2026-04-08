@@ -1,0 +1,411 @@
+/* --- HEADER STYLES --- */
+.app-header {
+    margin-bottom: 20px;
+    background: rgba(46, 50, 56, 0.6);
+    padding: 20px 30px;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.main-title {
+    text-align: center;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--muted-gold);
+    margin-top: 0;
+    margin-bottom: 20px;
+    letter-spacing: 1.5px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.subtitle-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding-bottom: 15px;
+}
+
+.col-left {
+    text-align: left;
+}
+
+.interactive-year {
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-bottom: 2px solid transparent;
+    line-height: 1;
+}
+
+.interactive-year:hover {
+    color: var(--muted-gold);
+    border-bottom: 2px solid var(--muted-gold);
+    text-shadow: 0 0 12px rgba(198, 167, 94, 0.4);
+}
+
+.year-input {
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: var(--muted-gold);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid var(--muted-gold);
+    outline: none;
+    width: 130px;
+    font-family: var(--font-sans);
+    line-height: 1;
+    padding: 0;
+}
+
+.year-input::-webkit-inner-spin-button,
+.year-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.col-center {
+    text-align: center;
+}
+
+.quote-muted {
+    font-family: var(--font-serif);
+    font-style: italic;
+    color: #aeb4be;
+    font-size: 1.3rem;
+    letter-spacing: 0.5px;
+}
+
+.col-right {
+    text-align: right;
+}
+
+.quote-right {
+    color: var(--text-main);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    display: inline-block;
+    font-weight: 300;
+    letter-spacing: 0.5px;
+    opacity: 0.9;
+}
+
+/* --- GRID & SCROLLING --- */
+.excel-container {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: 150px;
+    scroll-behavior: smooth;
+    background-color: rgba(36, 39, 44, 0.7);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.excel-container::-webkit-scrollbar {
+    height: 8px;
+}
+.excel-container::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+    border-radius: 0 0 16px 16px;
+}
+.excel-container::-webkit-scrollbar-thumb {
+    background: rgba(198, 167, 94, 0.5);
+    border-radius: 8px;
+}
+.excel-container::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-gold);
+}
+
+table {
+    border-collapse: separate;
+    border-spacing: 0;
+    white-space: nowrap;
+    table-layout: fixed;
+    width: max-content;
+}
+
+th, td {
+    padding: 0;
+    text-align: center;
+    border-bottom: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+}
+
+thead th {
+    background-color: rgba(36, 39, 44, 0.95);
+    padding: 15px 10px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    font-weight: 600;
+    letter-spacing: 1px;
+    font-size: 0.85rem;
+    color: var(--muted-gold);
+    border-top: 1px solid var(--border-color);
+    backdrop-filter: blur(5px);
+}
+
+thead th.month-col {
+    z-index: 15;
+    top: 0;
+    left: 0;
+    background-color: rgb(36, 39, 44);
+}
+
+.month-col {
+    background-color: rgb(36, 39, 44);
+    font-weight: 600;
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    padding: 0 20px;
+    width: 70px;
+    min-width: 70px;
+    box-shadow: 6px 0 15px -4px rgba(0, 0, 0, 0.6);
+    border-left: 1px solid var(--border-color);
+    color: var(--muted-gold);
+    letter-spacing: 1px;
+}
+
+.empty-col {
+    background-color: transparent;
+    width: 40px;
+    min-width: 40px;
+}
+
+/* --- DAY CELLS --- */
+.day-cell, .day-col-width {
+    width: 140px;
+    min-width: 140px;
+    height: 75px;
+    box-sizing: border-box;
+    cursor: pointer;
+    position: relative;
+    scroll-snap-align: start;
+    padding: 6px;
+}
+
+.box-inner {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    width: 100%;
+    height: 100%;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    background-color: var(--cell-bg);
+    border-radius: 8px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03), 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.day-cell:hover .box-inner {
+    background-color: var(--cell-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.3), inset 0 0 0 1px var(--muted-gold);
+}
+
+.date-val {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--text-main);
+}
+
+.left-val {
+    grid-column: 1;
+    grid-row: 2;
+    text-align: left;
+    align-self: end;
+    font-size: 10px;
+    color: #8b93a0;
+    font-weight: 500;
+}
+
+.spend-val {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: right;
+    align-self: end;
+    font-size: 10px;
+    color: #8b93a0;
+    font-weight: 500;
+}
+
+/* Status Overrides on Inner Box */
+.status-tick .box-inner {
+    background-color: var(--tick-color) !important;
+    border-bottom: 3px solid var(--tick-text);
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+.status-cross .box-inner {
+    background-color: var(--cross-color) !important;
+    border-bottom: 3px solid var(--cross-text);
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+/* Popup Header */
+.popup-header {
+    padding: 10px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.popup-date {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-dim);
+}
+
+.popup-status {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+}
+
+/* Status Indicator in Cell */
+.status-indicator {
+    position: absolute;
+    bottom: 5px;
+    left: 5px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: transparent;
+    transition: all 0.3s ease;
+}
+
+.has-note .status-indicator {
+    background: #42f587;
+    box-shadow: 0 0 5px #42f587;
+}
+
+.tick-note .status-indicator,
+.status-tick .status-indicator {
+    background: var(--tick-text);
+}
+
+.cross-note .status-indicator,
+.status-cross .status-indicator {
+    background: var(--cross-text);
+}
+
+/* New Note and Mixed Statuses */
+.has-note .box-inner {
+    background-color: rgba(66, 245, 135, 0.1) !important; /* Soft Greenish */
+    border-top: 3px solid #42f587;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+.tick-note .box-inner {
+    background: linear-gradient(135deg, rgba(66, 135, 245, 0.15) 0%, rgba(66, 245, 135, 0.15) 100%) !important;
+    border-bottom: 3px solid var(--tick-text);
+    border-top: 3px solid #42f587;
+}
+
+.cross-note .box-inner {
+    background: linear-gradient(135deg, rgba(245, 66, 66, 0.15) 0%, rgba(66, 245, 135, 0.15) 100%) !important;
+    border-bottom: 3px solid var(--cross-text);
+    border-top: 3px solid #42f587;
+}
+
+/* Current Day Highlight */
+.is-today .box-inner {
+  /* Yellow hata kar ek soft premium border aur glow de diya */
+  border: 2px solid rgba(255, 255, 255, 0.4) !important;
+  background-color: rgba(255, 255, 255, 0.05); 
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .app-header {
+        padding: 15px;
+        border-radius: 12px;
+    }
+
+    .main-title {
+        font-size: 1.5rem;
+        margin-bottom: 15px;
+    }
+
+    .subtitle-row {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        text-align: center;
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+
+    .col-left, .col-center, .col-right {
+        text-align: center;
+    }
+
+    .interactive-year, .year-input {
+        font-size: 2.2rem;
+    }
+
+    .quote-muted {
+        font-size: 1.1rem;
+    }
+
+    .quote-right {
+        font-size: 0.85rem;
+    }
+
+    .excel-container {
+        border-radius: 12px;
+        scroll-padding-left: 110px;
+    }
+
+    .month-col {
+        width: 50px;
+        min-width: 50px;
+        font-size: 0.8rem;
+        padding: 0 10px;
+        box-shadow: 4px 0 10px -2px rgba(0, 0, 0, 0.6);
+    }
+
+    .day-cell, .day-col-width {
+        width: 115px;
+        min-width: 115px;
+        height: 65px;
+        padding: 4px;
+    }
+
+    .box-inner {
+        padding: 4px 6px;
+        border-radius: 6px;
+    }
+
+    .date-val {
+        font-size: 14px;
+    }
+
+    .left-val, .spend-val {
+        font-size: 9px;
+    }
+}

@@ -43,25 +43,28 @@ service cloud.firestore {
 
     // Domain Validator for UserProgress
     function isValidUserProgress(data) {
-      return data.keys().hasAll(['logs']) &&
+      // 1MB Document size limit is enforced by Firebase inherently.
+      // We enforce structure constraints to prevent arbitrary injections.
+      return data.keys().hasOnly(['logs']) &&
              data.logs is map;
     }
 
     // Domain Validator for User Profile
     function isValidUser(data) {
       return hasOnlyAllowedFields(['firstName', 'lastName', 'email', 'marketingConsent', 'updatedAt']) &&
-             data.firstName is string && data.firstName.size() > 0 && data.firstName.size() < 50 &&
-             data.lastName is string && data.lastName.size() > 0 && data.lastName.size() < 50 &&
-             data.email is string && isValidEmail(data.email) &&
+             data.firstName is string && data.firstName.size() <= 50 &&
+             data.lastName is string && data.lastName.size() <= 50 &&
+             data.email is string && isValidEmail(data.email) && data.email.size() <= 100 &&
              data.marketingConsent is bool &&
              (!('updatedAt' in data) || isValidDateString(data.updatedAt));
     }
 
     // Domain Validator for Syllabus
     function isValidSyllabus(data) {
+      // Prevent massive arrays
       return data.keys().hasAll(['subjects']) &&
              data.subjects is list &&
-             data.subjects.size() <= 100; // Limit to 100 subjects
+             data.subjects.size() <= 100; // Hard limit on subjects array length
     }
 
     function isAdmin() {

@@ -8,20 +8,22 @@ import { initializeApp } from "firebase/app";
 import { getAuth, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getFirestore, doc, getDocFromCache, getDocFromServer } from "firebase/firestore";
 
-// Import the Firebase configuration from environment variables
+// Firebase Web SDK requires the routing configuration to be publicly accessible in the browser.
+// True security lies in our strict Firestore Rules, not in hiding these routing IDs.
+// Note: Replace these placeholders with your actual Firebase config strings.
 const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-    firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID
+    apiKey: "AIzaSyCwh87M2yq4v45MzTsT6ak-el5zJ6-mJMs",
+    authDomain: "focushub-db.firebaseapp.com",
+    projectId: "focushub-db",
+    storageBucket: "focushub-db.firebasestorage.app",
+    messagingSenderId: "419527223079",
+    appId: "1:419527223079:web:87ca93a46e03a8cd43ab02",
+    firestoreDatabaseId: "(default)"
 };
 
 // Check if critical config is missing
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-    console.error("Firebase Configuration is missing! Please add VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID to your environment variables in the Settings menu.");
+if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
+    console.error("Firebase Configuration is missing! Please paste your actual keys into firebase-config.js");
 }
 
 // Initialize Firebase App

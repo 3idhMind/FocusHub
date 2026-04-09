@@ -27,10 +27,23 @@ export default async function handler(req, res) {
     }
 
     const { email, firstName, lastName } = req.body;
+    const authHeader = req.headers.authorization;
 
-    // 3. Validate input
-    if (!email) {
-        return res.status(400).json({ error: 'Email is required' });
+    // 3. Security Hardening: Require Authorization token to prevent bot spam
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.warn('Unauthorized API access attempt block: Missing or invalid Authorization header.');
+        return res.status(401).json({ error: 'Unauthorized. Valid Firebase ID token is required.', code: 'UNAUTHORIZED' });
+    }
+
+    // Optional Extra Security: Verify token length/format (basic heuristic block without firebase-admin overhead)
+    const token = authHeader.split('Bearer ')[1];
+    if (!token || token.length < 100) {
+        return res.status(401).json({ error: 'Unauthorized. Invalid token structure.' });
+    }
+
+    // 4. Validate input variables
+    if (!email || email.length > 100 || !email.includes('@')) {
+        return res.status(400).json({ error: 'Invalid or missing email' });
     }
 
     // 4. Fetch secrets from environment variables

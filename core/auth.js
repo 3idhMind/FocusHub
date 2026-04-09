@@ -350,20 +350,32 @@ export async function handlePasswordReset(email) {
  */
 async function syncToBrevo(email, firstName, lastName) {
     try {
+        if (!auth || !auth.currentUser) {
+            console.warn("Brevo Sync Warning: No authenticated user to authorize sync.");
+            return;
+        }
+        
+        // Retrieve valid Firebase ID token to authorize serverless function
+        const idToken = await auth.currentUser.getIdToken(true);
+
         // Silent background fetch to our Vercel Serverless Function
         const response = await fetch('/api/sync-contact', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
             body: JSON.stringify({ email, firstName, lastName })
         });
         
         if (!response.ok) {
-            console.warn("Brevo Sync Warning: Failed to sync contact.");
+            const errorData = await response.json().catch(() => ({}));
+            console.warn("Brevo Sync Warning: Failed to sync contact.", errorData);
         } else {
             console.log("Brevo Sync Success: User added to mailing list.");
         }
     } catch (err) {
-        console.error("Brevo Sync Error (Network):", err);
+        console.error("Brevo Sync Error (Network or Token):", err);
     }
 }
 

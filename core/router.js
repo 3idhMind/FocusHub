@@ -6,35 +6,40 @@
 const appCanvas = document.getElementById('app-canvas');
 const navItems = document.querySelectorAll('.nav-item');
 
+// Vite Dynamic Import Maps for Production Statically Analyzable Bundling
+const htmlModules = import.meta.glob('../features/**/*.html', { query: '?raw', import: 'default' });
+const jsModules = import.meta.glob('../features/**/*.js');
+const cssModules = import.meta.glob('../features/**/*.css');
+
 const routes = {
     'tool-dashboard': {
-        html: '/features/dashboard/dashboard.html',
-        js: '/features/dashboard/dashboard.js'
+        html: '../features/dashboard/dashboard.html',
+        js: '../features/dashboard/dashboard.js'
     },
     'tool-365': {
-        html: '/features/365-tracker/tracker.html',
-        js: '/features/365-tracker/tracker.js',
-        css: '/features/365-tracker/tracker.css'
+        html: '../features/365-tracker/tracker.html',
+        js: '../features/365-tracker/tracker.js',
+        css: '../features/365-tracker/tracker.css'
     },
     'tool-syllabus': {
-        html: '/features/syllabus/syllabus.html',
-        js: '/features/syllabus/syllabus.js',
-        css: '/features/syllabus/syllabus.css'
+        html: '../features/syllabus/syllabus.html',
+        js: '../features/syllabus/syllabus.js',
+        css: '../features/syllabus/syllabus.css'
     },
     'tool-notes': {
-        html: '/features/notes/notes.html',
-        js: '/features/notes/notes.js',
-        css: '/features/notes/notes.css'
+        html: '../features/notes/notes.html',
+        js: '../features/notes/notes.js',
+        css: '../features/notes/notes.css'
     },
     'tool-trash': {
-        html: '/features/trash/trash.html',
-        js: '/features/trash/trash.js',
-        css: '/features/trash/trash.css'
+        html: '../features/trash/trash.html',
+        js: '../features/trash/trash.js',
+        css: '../features/trash/trash.css'
     },
     'tool-profile': {
-        html: '/features/profile/profile.html',
-        js: '/features/profile/profile.js',
-        css: '/features/profile/profile.css'
+        html: '../features/profile/profile.html',
+        js: '../features/profile/profile.js',
+        css: '../features/profile/profile.css'
     }
 };
 
@@ -65,9 +70,12 @@ export async function navigate(targetId) {
         // Load HTML Content
         if (route.html) {
             try {
-                const response = await fetch(route.html);
-                const html = await response.text();
-                newWrapper.innerHTML = html;
+                if (htmlModules[route.html]) {
+                    const html = await htmlModules[route.html]();
+                    newWrapper.innerHTML = html;
+                } else {
+                    throw new Error(`Glob import not found for HTML: ${route.html}`);
+                }
             } catch (error) {
                 console.error(`Failed to load HTML for ${targetId}:`, error);
                 newWrapper.innerHTML = `<div class="placeholder-content"><h2>Error</h2><p>Failed to load feature.</p></div>`;
@@ -76,24 +84,29 @@ export async function navigate(targetId) {
             newWrapper.innerHTML = route.content;
         }
 
-        // Load CSS Content
+        // Load CSS Content via Vite chunk importer
         if (route.css) {
-            let link = document.getElementById(`css-${targetId}`);
-            if (!link) {
-                link = document.createElement('link');
-                link.id = `css-${targetId}`;
-                link.rel = 'stylesheet';
-                link.href = route.css;
-                document.head.appendChild(link);
+            try {
+                if (cssModules[route.css]) {
+                    await cssModules[route.css]();
+                } else {
+                    console.warn(`Glob import not found for CSS: ${route.css}`);
+                }
+            } catch (error) {
+                console.error(`Failed to load CSS for ${targetId}:`, error);
             }
         }
 
-        // Load JS Content (Static module caching, NO bypass)
+        // Load JS Content via Vite dynamic import map 
         if (route.js) {
             try {
-                const module = await import(route.js);
-                if (module.init) {
-                    module.init();
+                if (jsModules[route.js]) {
+                    const module = await jsModules[route.js]();
+                    if (module.init) {
+                        module.init();
+                    }
+                } else {
+                    console.warn(`Glob import not found for JS: ${route.js}`);
                 }
             } catch (error) {
                 console.error(`Failed to load JS for ${targetId}:`, error);

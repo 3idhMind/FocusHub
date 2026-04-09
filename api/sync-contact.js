@@ -6,13 +6,18 @@
  */
 
 export default async function handler(req, res) {
-    // 1. Basic CORS headers for the frontend
+    // FIX #7: CORS restricted to production domain only.
+    // The API requires a valid Firebase ID Token anyway, but domain-locking is defense-in-depth.
+    const allowedOrigins = ['https://focushub.3idhmind.in', 'https://focushub-db.web.app'];
+    const requestOrigin = req.headers.origin || '';
+    const corsOrigin = allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0];
+
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
     res.setHeader(
         'Access-Control-Allow-Headers',
-        'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+        'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
     );
 
     // Handle preflight OPTIONS request

@@ -1,5 +1,5 @@
-import { getCurrentUser, triggerFearOfLoss } from "../../core/auth.js";
-import { updateDayLog, loadProgress } from "../../core/db.js";
+import { getCurrentUser, triggerFearOfLoss, showToast } from "../../core/auth.js";
+import { getState, subscribe, dispatchUpdateDay, dispatchMoveToTrash } from "../../core/state.js";
 
 let CURRENT_YEAR = new Date().getFullYear();
 let currentModalDate = null;
@@ -20,14 +20,30 @@ function isLeapYear(year) {
 
 export function init() {
     console.log("Tracker Feature Initializing...");
-    buildCalendar(CURRENT_YEAR);
+
+    // Subscribe ONCE to the Brain. When state is ready or logs change, re-paint the calendar.
+    subscribe('stateReady', ({ logs }) => { buildCalendar(CURRENT_YEAR, logs); applyLogsToCalendar(logs); });
+    subscribe('logsUpdated', ({ logs }) => applyLogsToCalendar(logs));
+
+    // Build the empty calendar shell first (no logs needed yet)
+    buildCalendar(CURRENT_YEAR, {});
     setupEventListeners();
-    syncCalendarWithCloud();
+
+    // If state is already available (e.g., module loaded after stateReady fired), paint now.
+    const { logs, isGuest } = getState();
+    if (!isGuest && Object.keys(logs).length > 0) {
+        buildCalendar(CURRENT_YEAR, logs);
+        applyLogsToCalendar(logs);
+    }
 }
 
-export const onShow = syncCalendarWithCloud;
+// onShow: called by router on every tab switch — repaints from current in-memory state (zero network)
+export function onShow() {
+    const { logs } = getState();
+    applyLogsToCalendar(logs);
+}
 
-function buildCalendar(year) {
+function buildCalendar(year, logs = {}) {
     const yearDisplay = document.getElementById('yearDisplay');
     if (yearDisplay) {
         yearDisplay.innerText = year;
@@ -97,8 +113,8 @@ function buildCalendar(year) {
                 </div>
             `;
 
-            // Root Cause Fix: Apply cached data immediately during build
-            const cachedData = window.trackerCache[dateKey];
+            // Seed local render cache from state snapshot passed into buildCalendar
+            const cachedData = (logs && logs[dateKey]) ? logs[dateKey] : (window.trackerCache || {})[dateKey];
             if (cachedData) {
                 const status = cachedData.status || 'pending';
                 const note = cachedData.note || '';
@@ -198,12 +214,10 @@ export async function openDayModal(dateKey) {
     }
     if (popupStatus) popupStatus.innerText = 'Pending';
 
-    // Load existing data if any
-    const user = getCurrentUser();
-    if (user) {
-        // Use persisted cache (it was loaded correctly on initialization). 
-        // If undefined, it means this day has no log in Firestore, so it's 'pending'.
-        const dayData = window.trackerCache[dateKey];
+    // Read from the Brain's in-memory state (zero network cost)
+    const { logs, uid } = getState();
+    if (uid) {
+        const dayData = logs[dateKey];
         if (dayData) {
             currentModalStatus = dayData.status || 'pending';
             currentModalNote = dayData.note || '';
@@ -263,15 +277,12 @@ export async function updateStatus(status) {
         else popupStatus.innerText = 'Pending';
     }
 
-    // Optimistic UI
+    // Optimistic UI: update cell immediately
     updateCellUI(dateKey, status, currentModalNote);
 
     if (user) {
-        try {
-            await updateDayLog(user.uid, dateKey, status, currentModalNote, false);
-        } catch (error) {
-            console.error("Failed to update status:", error);
-        }
+        // Dispatch to the Brain — it updates state, notifies all modules, then syncs to Firestore
+        dispatchUpdateDay(dateKey, { status, note: currentModalNote });
     } else {
         if (status === 'completed') triggerFearOfLoss();
     }
@@ -298,25 +309,20 @@ export async function clearDay() {
     const popupStatus = document.getElementById('popup-status');
     if (popupStatus) popupStatus.innerText = 'Pending';
 
-    // Optimistic UI: Hide from calendar (inTrash logic)
-    // IMPORTANT: We pass currentModalNote here so it's preserved in the cache even if inTrash is true
-    updateCellUI(dateKey, 'pending', currentModalNote, hasNote); 
+    // Optimistic UI: clear cell visually
+    updateCellUI(dateKey, 'pending', currentModalNote, hasNote);
 
     if (user) {
-        try {
-            if (hasNote) {
-                // Move to trash: status null, inTrash true
-                await updateDayLog(user.uid, dateKey, null, currentModalNote, true);
-                import("../../core/auth.js").then(m => m.showToast(`Moved note to Trash`));
-            } else {
-                // Just clear: status null, note empty, inTrash false
-                await updateDayLog(user.uid, dateKey, null, '', false);
-            }
-        } catch (error) {
-            console.error("Failed to clear day:", error);
+        if (hasNote) {
+            // Move to Trash via Brain dispatch
+            dispatchMoveToTrash(dateKey);
+            showToast(`Moved note to Trash`);
+        } else {
+            // Just clear the day status
+            dispatchUpdateDay(dateKey, { status: null, note: '' });
         }
     }
-    
+
     currentModalStatus = 'pending';
     currentModalNote = '';
     hidePopup();
@@ -363,21 +369,17 @@ export async function saveDiaryNote() {
     }
     
     currentModalNote = note;
-    
     const user = getCurrentUser();
-    
-    // Update UI immediately
+
+    // Optimistic UI update
     updateCellUI(currentModalDate, currentModalStatus, note);
 
     if (user) {
-        try {
-            await updateDayLog(user.uid, currentModalDate, currentModalStatus, note, false);
-            console.log("Diary note saved");
-        } catch (error) {
-            console.error("Failed to save diary note:", error);
-        }
+        // Dispatch to Brain — no direct db.js call
+        dispatchUpdateDay(currentModalDate, { status: currentModalStatus, note });
+        console.log("Diary note dispatched to state.");
     }
-    
+
     document.getElementById('diary-modal').classList.add('hidden');
 }
 
@@ -396,7 +398,8 @@ function updateCellUI(dateKey, status, note, inTrash = false) {
     const cell = document.querySelector(`[data-date="${dateKey}"]`);
     if (!cell) return;
 
-    // Update persisted cache
+    // Update the local render cache (sourced from globalState, mirrored here for DOM paint speed)
+    if (!window.trackerCache) window.trackerCache = {};
     if (!window.trackerCache[dateKey]) window.trackerCache[dateKey] = {};
     window.trackerCache[dateKey].status = status;
     window.trackerCache[dateKey].note = note;
@@ -424,37 +427,32 @@ function updateCellUI(dateKey, status, note, inTrash = false) {
     }
 }
 
-async function syncCalendarWithCloud() {
-    const user = getCurrentUser();
-    if (!user) return;
+/**
+ * applyLogsToCalendar — The Brain pushes logs here.
+ * Reads exclusively from state (no Firestore, no fetch).
+ *
+ * FILTER RULE (Tracker):
+ *   inTrash === true  → reset cell to blank (hide from calendar view)
+ *   inTrash === false → paint cell with status/note classes as normal
+ */
+function applyLogsToCalendar(logs) {
+    if (!logs) return;
+    window.trackerCache = { ...logs }; // Mirror state into local render cache
 
-    console.log(`Syncing progress from cloud...`);
-    try {
-        const logs = await loadProgress(user.uid);
-        window.trackerCache = { ...window.trackerCache, ...logs }; // Merge with existing cache
-        
-        if (logs) {
-            Object.keys(logs).forEach(dateKey => {
-                const dayData = logs[dateKey];
-                const status = typeof dayData === 'object' ? dayData.status : dayData;
-                const note = typeof dayData === 'object' ? dayData.note : '';
-                const inTrash = typeof dayData === 'object' ? dayData.inTrash : false;
-                
-                updateCellUI(dateKey, status, note, inTrash);
-            });
+    Object.keys(logs).forEach(dateKey => {
+        const dayData = logs[dateKey];
+        if (!dayData || typeof dayData !== 'object') return;
+
+        const { status, note = '', inTrash = false } = dayData;
+
+        if (inTrash) {
+            // FILTER: explicitly reset this cell — do not leave stale colour classes
+            updateCellUI(dateKey, null, '', true);
+        } else {
+            // PASS: active log — paint with correct status + note combination
+            updateCellUI(dateKey, status, note, false);
         }
-    } catch (error) {
-        console.error("Cloud Sync Error:", error);
-        // If it's a permission error, it will be a JSON string from handleFirestoreError
-        try {
-            const errInfo = JSON.parse(error.message);
-            if (errInfo.error.includes('permissions')) {
-                console.warn("Permission denied. Please check Firestore rules.");
-            }
-        } catch (e) {
-            // Not a JSON error, just log it
-        }
-    }
+    });
 }
 
 /**
@@ -485,8 +483,9 @@ function saveYear() {
     if (!isNaN(newYear) && newYear > 1900 && newYear < 2100) {
         if (CURRENT_YEAR !== newYear) {
             CURRENT_YEAR = newYear;
-            buildCalendar(CURRENT_YEAR);
-            syncCalendarWithCloud();
+            const { logs } = getState();
+            buildCalendar(CURRENT_YEAR, logs);
+            applyLogsToCalendar(logs);
         }
     } else {
         input.value = CURRENT_YEAR;
@@ -519,14 +518,5 @@ window.tracker = {
     saveDiaryNote
 };
 
-// Listen for Auth changes to sync data
-window.addEventListener('authChanged', (e) => {
-    const user = e.detail.user;
-    if (user) {
-        // Only sync if we are actually on the tracker page
-        const trackerContainer = document.getElementById('scrollContainer');
-        if (trackerContainer) {
-            syncCalendarWithCloud();
-        }
-    }
-});
+// NOTE: The old 'authChanged' window listener is removed.
+// The Brain (state.js) now owns post-login re-hydration via onAuthChange() → notify('logsUpdated').

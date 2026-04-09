@@ -29,6 +29,25 @@ export function invalidateCache() {
 }
 
 /**
+ * AUTH GUARD — The DB-level firewall.
+ * Every public data function calls this first.
+ * If the user is not authenticated, it throws a clean, descriptive error
+ * instead of sending a guaranteed-to-fail request to Firestore.
+ * This is the second line of defense after the Auth-First Gatekeeper in app.js.
+ */
+function requireAuth(uid) {
+    if (!uid || !auth.currentUser || auth.currentUser.uid !== uid) {
+        const reason = !uid ? 'No UID provided'
+            : !auth.currentUser ? 'Firebase Auth not yet resolved (Guest Mode)'
+            : 'UID mismatch (security violation)';
+        console.warn(`DB Guard: Blocked Firestore call. Reason: ${reason}`);
+        // Return false to signal the caller to abort — never throw in background sync paths
+        return false;
+    }
+    return true;
+}
+
+/**
  * Helper to fetch a document with a timeout.
  * Prevents the app from hanging indefinitely on broken connections.
  */
@@ -89,6 +108,7 @@ function handleFirestoreError(error, operationType, path) {
  * @param {string} status - 'completed', 'skipped', or 'pending'
  */
 export async function updateDateStatus(uid, dateKey, status) {
+    if (!requireAuth(uid)) return;
     return updateDayLog(uid, dateKey, status, undefined, false);
 }
 
@@ -99,6 +119,7 @@ export async function updateDateStatus(uid, dateKey, status) {
  * @param {string} note - The user's note
  */
 export async function updateDateNote(uid, dateKey, note) {
+    if (!requireAuth(uid)) return;
     return updateDayLog(uid, dateKey, undefined, note, false);
 }
 
@@ -118,6 +139,7 @@ export async function updateDateNote(uid, dateKey, note) {
  */
 export async function updateDayLog(uid, dateKey, status, note, inTrash = false) {
     if (!uid || !dateKey) return;
+    if (!requireAuth(uid)) return;
 
     const docRef = doc(db, "users_progress", uid);
     const path = `users_progress/${uid}`;
@@ -246,6 +268,7 @@ export async function updateInTrash(uid, dateKey, inTrash) {
  */
 export async function getUserProfile(uid, forceRefresh = false) {
     if (!uid) return null;
+    if (!requireAuth(uid)) return null;
 
     if (!forceRefresh && IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.profile !== null) {
         return IN_MEMORY_CACHE.profile;
@@ -274,6 +297,7 @@ export async function getUserProfile(uid, forceRefresh = false) {
  */
 export async function saveUserProfile(uid, profileData) {
     if (!uid) return;
+    if (!requireAuth(uid)) return;
 
     const docRef = doc(db, "users", uid);
     const path = `users/${uid}`;
@@ -303,6 +327,7 @@ export async function saveUserProfile(uid, profileData) {
  */
 export async function loadProgress(uid, forceRefresh = false) {
     if (!uid) return {};
+    if (!requireAuth(uid)) return {};
 
     if (!forceRefresh && IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.progress !== null) {
         console.log("⚡ Network Saved: Returning logs from cache.");
@@ -370,6 +395,7 @@ export async function loadProgress(uid, forceRefresh = false) {
  */
 export async function deleteDayLog(uid, dateKey) {
     if (!uid || !dateKey) return;
+    if (!requireAuth(uid)) return;
 
     const docRef = doc(db, "users_progress", uid);
     const path = `users_progress/${uid}`;

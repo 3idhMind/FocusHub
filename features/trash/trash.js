@@ -1,5 +1,5 @@
-import { getCurrentUser } from "../../core/auth.js";
-import { loadProgress, deleteDayLog, updateInTrash } from "../../core/db.js";
+import { showToast } from "../../core/auth.js";
+import { getState, subscribe, dispatchRestoreFromTrash, dispatchDeleteDay } from "../../core/state.js";
 
 // Persistent state across module re-loads
 if (!window.trashState) {
@@ -12,117 +12,105 @@ if (!window.trashState) {
 const trashModule = {
     init: () => {
         console.log("Trash: Initializing...");
-        trashModule.renderTrash();
+
+        // Subscribe to the Brain — re-renders automatically when any module mutates logs
+        subscribe('stateReady', ({ logs, isGuest }) => trashModule.renderTrash(logs, isGuest));
+        subscribe('logsUpdated', ({ logs }) => trashModule.renderTrash(logs, getState().isGuest));
+
+        // If state already resolved, render now
+        const { logs, isGuest } = getState();
+        trashModule.renderTrash(logs, isGuest);
     },
 
-    renderTrash: async () => {
+    // onShow: called by router on tab switch — reads from Brain, zero network
+    renderTrash: (logs, isGuest) => {
+        // Allow calling with no args from onShow — pull current state
+        if (!logs) ({ logs, isGuest } = getState());
+
         const trashList = document.getElementById('trash-list');
         if (!trashList) return;
 
-        const user = getCurrentUser();
-        if (!user) {
+        if (isGuest) {
             trashList.innerHTML = '<div class="empty-trash-state">Please log in to view trash.</div>';
             return;
         }
 
-        try {
-            const logs = await loadProgress(user.uid);
-            const now = new Date();
-            const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+        const now = new Date();
+        const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
+        const trashItems = [];
+        const autoDeleteKeys = [];
 
-            const trashItems = [];
-            const autoDeletePromises = [];
+        /**
+         * FILTER RULE (Trash) — strict, declarative, one condition:
+         *   inTrash === true  → show in Trash view (regardless of status or note content)
+         *   inTrash !== true  → EXCLUDE — active logs never appear in Trash
+         * The '=== true' strict equality guard prevents null/undefined from leaking through.
+         */
+        for (const [date, data] of Object.entries(logs)) {
+            if (data && data.inTrash === true) {  // ← strict: must be explicitly true
+                const deletionTime = data.deletedAt ? new Date(data.deletedAt)
+                    : (data.updatedAt ? new Date(data.updatedAt) : new Date());
+                const timeDiff = now - deletionTime;
 
-            for (const [date, data] of Object.entries(logs)) {
-                if (data && data.inTrash === true) {
-                    // Priority: deletedAt > updatedAt > current time (fallback)
-                    const deletionTime = data.deletedAt ? new Date(data.deletedAt) : 
-                                       (data.updatedAt ? new Date(data.updatedAt) : new Date());
-                    
-                    const timeDiff = now - deletionTime;
-                    
-                    if (timeDiff > thirtyDaysInMs) {
-                        console.log(`Auto-deleting expired trash item: ${date}`);
-                        autoDeletePromises.push(deleteDayLog(user.uid, date));
-                        if (window.trackerCache) delete window.trackerCache[date];
-                    } else {
-                        const daysRemaining = Math.ceil((thirtyDaysInMs - timeDiff) / (24 * 60 * 60 * 1000));
-                        trashItems.push({ date, data, daysRemaining });
-                    }
+                if (timeDiff > thirtyDaysInMs) {
+                    console.log(`Auto-deleting expired trash item: ${date}`);
+                    autoDeleteKeys.push(date);
+                } else {
+                    const daysRemaining = Math.ceil((thirtyDaysInMs - timeDiff) / (24 * 60 * 60 * 1000));
+                    trashItems.push({ date, data, daysRemaining });
                 }
             }
-
-            // Wait for all auto-deletions to finish
-            if (autoDeletePromises.length > 0) {
-                await Promise.all(autoDeletePromises);
-                console.log(`Auto-deleted ${autoDeletePromises.length} items.`);
-            }
-
-            if (trashItems.length === 0) {
-                trashList.innerHTML = `
-                    <div class="empty-trash-state">
-                        <span class="empty-trash-icon">🗑️</span>
-                        <p>Your trash is empty. No deleted logs found.</p>
-                    </div>
-                `;
-                return;
-            }
-
-            // Sort by date descending
-            trashItems.sort((a, b) => b.date.localeCompare(a.date));
-
-            trashList.innerHTML = trashItems.map(({ date, data, daysRemaining }) => {
-                const dateObj = new Date(date + 'T00:00:00');
-                const formattedDate = dateObj.toLocaleDateString('en-US', { 
-                    weekday: 'short', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                });
-
-                return `
-                    <div class="trash-item" data-date="${date}">
-                        <div class="trash-info">
-                            <div class="trash-date">${formattedDate}</div>
-                            <div class="trash-note">${data.note || 'No note attached.'}</div>
-                            <div class="trash-remaining">⏳ ${daysRemaining} days remaining until permanent deletion</div>
-                        </div>
-                        <div class="trash-actions">
-                            <button class="trash-btn btn-restore" onclick="window.trashModule.restoreItem('${date}')">
-                                ♻️ Restore
-                            </button>
-                            <button class="trash-btn btn-delete-forever" onclick="window.trashModule.openConfirmModal('${date}')">
-                                🛑 Delete Forever
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-        } catch (error) {
-            console.error("Failed to load trash:", error);
-            trashList.innerHTML = '<div class="empty-trash-state">Error loading trash. Please try again.</div>';
         }
+
+        // Dispatch auto-deletions via Brain (not direct db calls)
+        autoDeleteKeys.forEach(date => dispatchDeleteDay(date));
+
+        if (trashItems.length === 0) {
+            trashList.innerHTML = `
+                <div class="empty-trash-state">
+                    <span class="empty-trash-icon">🗑️</span>
+                    <p>Your trash is empty. No deleted logs found.</p>
+                </div>
+            `;
+            return;
+        }
+
+        trashItems.sort((a, b) => b.date.localeCompare(a.date));
+
+        trashList.innerHTML = trashItems.map(({ date, data, daysRemaining }) => {
+            const dateObj = new Date(date + 'T00:00:00');
+            const formattedDate = dateObj.toLocaleDateString('en-US', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            return `
+                <div class="trash-item" data-date="${date}">
+                    <div class="trash-info">
+                        <div class="trash-date">${formattedDate}</div>
+                        <div class="trash-note">${data.note || 'No note attached.'}</div>
+                        <div class="trash-remaining">⏳ ${daysRemaining} days remaining until permanent deletion</div>
+                    </div>
+                    <div class="trash-actions">
+                        <button class="trash-btn btn-restore" onclick="window.trashModule.restoreItem('${date}')">
+                            ♻️ Restore
+                        </button>
+                        <button class="trash-btn btn-delete-forever" onclick="window.trashModule.openConfirmModal('${date}')">
+                            🛑 Delete Forever
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
     },
 
     restoreItem: async (date) => {
-        const user = getCurrentUser();
-        if (!user) return;
-
-        try {
-            await updateInTrash(user.uid, date, false);
-            
-            if (window.trackerCache && window.trackerCache[date]) {
-                window.trackerCache[date].inTrash = false;
-            }
-            
-            console.log(`Restored item for ${date}`);
-            trashModule.renderTrash();
-            
-            import("../../core/auth.js").then(m => m.showToast(`Restored note for ${date}`));
-        } catch (error) {
-            console.error("Failed to restore item:", error);
-        }
+        // Dispatch to Brain — it updates state, notifies all modules, then syncs to Firestore
+        dispatchRestoreFromTrash(date);
+        showToast(`Restored note for ${date}`);
+        console.log(`Dispatched restore for ${date}`);
     },
 
     openConfirmModal: (date) => {
@@ -151,24 +139,12 @@ const trashModule = {
             return;
         }
 
-        const user = getCurrentUser();
-        if (!user) return;
+        console.log("Trash: Permanently deleting:", date);
+        // Dispatch hard delete to Brain — it removes from globalState and Firestore
+        dispatchDeleteDay(date);
 
-        try {
-            console.log("Trash: Permanently deleting:", date);
-            await deleteDayLog(user.uid, date);
-            
-            if (window.trackerCache) {
-                delete window.trackerCache[date];
-            }
-            
-            trashModule.closeConfirmModal();
-            trashModule.renderTrash();
-            
-            import("../../core/auth.js").then(m => m.showToast(`Permanently deleted log for ${date}`));
-        } catch (error) {
-            console.error("Failed to delete item forever:", error);
-        }
+        trashModule.closeConfirmModal();
+        showToast(`Permanently deleted log for ${date}`);
     }
 };
 
@@ -176,15 +152,7 @@ const trashModule = {
 window.trashModule = trashModule;
 
 export const init = trashModule.init;
-export const onShow = trashModule.renderTrash;
+export const onShow = () => trashModule.renderTrash();
 
-// Listen for Auth changes to sync data
-window.addEventListener('authChanged', (e) => {
-    const user = e.detail.user;
-    if (user) {
-        const trashList = document.getElementById('trash-list');
-        if (trashList) {
-            trashModule.renderTrash();
-        }
-    }
-});
+// NOTE: The old 'authChanged' window listener is removed.
+// The Brain (state.js) now owns post-login re-hydration via onAuthChange() → notify('logsUpdated').

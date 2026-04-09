@@ -1,25 +1,45 @@
 /**
  * features/profile/profile.js
- * Logic for the user profile section.
+ * ROLE: UI renderer for the Profile tab.
+ *
+ * ARCHITECTURE CONTRACT:
+ *   - Reads from getState() — never directly from db.js or firebase-config.js
+ *   - Subscribes to 'stateReady' and 'authChanged' events from the Brain
+ *   - Profile Firestore data (firstName/lastName) is loaded by state.js during hydration
  */
 
-import { auth } from '../../core/firebase-config.js';
-import { getUserProfile } from '../../core/db.js';
+import { getState, subscribe } from '../../core/state.js';
 
-export async function init() {
+export function init() {
     console.log("Profile feature initialized");
-    
-    // Bind to the auth change event so the profile updates dynamically
-    window.addEventListener('authChanged', (e) => {
-        renderProfile(e.detail.user);
+
+    // Subscribe to Brain events — re-render on every auth state transition
+    subscribe('stateReady', ({ uid, isGuest, profile }) => {
+        renderProfile(uid, isGuest, profile);
     });
 
-    // Render immediately if auth state is already known
-    const currentUser = auth.currentUser;
-    renderProfile(currentUser);
+    subscribe('authChanged', ({ uid, isGuest }) => {
+        const { profile } = getState();
+        renderProfile(uid, isGuest, profile);
+    });
+
+    subscribe('profileUpdated', ({ profile, uid }) => {
+        const { isGuest } = getState();
+        renderProfile(uid, isGuest, profile);
+    });
+
+    // If state is already available (loaded before this module mounted), paint now
+    const { uid, isGuest, profile } = getState();
+    renderProfile(uid, isGuest, profile);
 }
 
-async function renderProfile(user) {
+// onShow — called by router on every tab revisit (zero network cost)
+export function onShow() {
+    const { uid, isGuest, profile } = getState();
+    renderProfile(uid, isGuest, profile);
+}
+
+function renderProfile(uid, isGuest, profile) {
     const nameDisplay = document.getElementById('profile-name-display');
     const emailDisplay = document.getElementById('profile-email-display');
     const avatarDisplay = document.getElementById('profile-avatar-display');
@@ -28,44 +48,42 @@ async function renderProfile(user) {
     const guestActions = document.getElementById('profile-guest-actions');
     const userActions = document.getElementById('profile-user-actions');
 
-    if (!nameDisplay) return; // Feature might not be in DOM yet
+    if (!nameDisplay) return; // Feature DOM not mounted yet
 
-    if (user) {
-        // Optimistic UI Update: Show known data immediately to prevent "Guest" flash
-        let displayName = user.displayName;
-        nameDisplay.innerText = displayName || "Loading Profile...";
-        emailDisplay.innerText = user.email;
-        avatarDisplay.innerText = (displayName || "L").charAt(0).toUpperCase();
+    if (!isGuest && uid) {
+        // Build display name from Firestore profile (hydrated by state.js)
+        let displayName = 'FocusHub User';
+        let emailStr = '';
 
-        statusDot.className = 'status-indicator online';
-        statusText.innerText = "Active - Your progress is safely synced to the cloud";
-
-        guestActions.classList.add('hidden');
-        userActions.classList.remove('hidden');
-
-        // Fetch detailed profile from Firestore
-        try {
-            const userProfile = await getUserProfile(user.uid);
-            if (userProfile && userProfile.firstName) {
-                displayName = `${userProfile.firstName} ${userProfile.lastName || ''}`.trim();
-                // Update with full names once loaded
-                nameDisplay.innerText = displayName;
-                avatarDisplay.innerText = (displayName).charAt(0).toUpperCase();
+        if (profile) {
+            if (profile.firstName) {
+                displayName = `${profile.firstName} ${profile.lastName || ''}`.trim();
             }
-        } catch(e) {
-            console.error("Could not fetch user profile details", e);
-            nameDisplay.innerText = displayName || "FocusHub User";
+            if (profile.email) {
+                emailStr = profile.email;
+            }
         }
 
+        nameDisplay.innerText = displayName;
+        emailDisplay.innerText = emailStr || 'Authenticated User';
+        avatarDisplay.innerText = displayName.charAt(0).toUpperCase();
+
+        if (statusDot) statusDot.className = 'status-indicator online';
+        if (statusText) statusText.innerText = 'Active — Your progress is safely synced to the cloud';
+
+        if (guestActions) guestActions.classList.add('hidden');
+        if (userActions) userActions.classList.remove('hidden');
+
     } else {
-        nameDisplay.innerText = "Guest User";
-        emailDisplay.innerText = "Not logged in";
-        avatarDisplay.innerText = "G";
+        // Guest Mode
+        nameDisplay.innerText = 'Guest User';
+        emailDisplay.innerText = 'Not logged in';
+        avatarDisplay.innerText = 'G';
 
-        statusDot.className = 'status-indicator offline';
-        statusText.innerText = "Guest Mode - Progress is completely local and not backed up";
+        if (statusDot) statusDot.className = 'status-indicator offline';
+        if (statusText) statusText.innerText = 'Guest Mode — Progress is local only and not backed up';
 
-        guestActions.classList.remove('hidden');
-        userActions.classList.add('hidden');
+        if (guestActions) guestActions.classList.remove('hidden');
+        if (userActions) userActions.classList.add('hidden');
     }
 }

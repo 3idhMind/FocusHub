@@ -97,11 +97,13 @@ export async function navigate(targetId) {
             }
         }
 
-        // Load JS Content via Vite dynamic import map 
+        // Load JS Content via Vite dynamic import map
         if (route.js) {
             try {
                 if (jsModules[route.js]) {
                     const module = await jsModules[route.js]();
+                    // Store module reference on the DOM node for onShow() calls later
+                    newWrapper._module = module;
                     if (module.init) {
                         module.init();
                     }
@@ -111,6 +113,12 @@ export async function navigate(targetId) {
             } catch (error) {
                 console.error(`Failed to load JS for ${targetId}:`, error);
             }
+        }
+    } else {
+        // Wrapper already exists — module was previously initialized.
+        // Call onShow() to re-render from current in-memory state (zero network).
+        if (newWrapper._module && typeof newWrapper._module.onShow === 'function') {
+            newWrapper._module.onShow();
         }
     }
 

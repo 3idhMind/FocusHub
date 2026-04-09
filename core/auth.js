@@ -21,10 +21,18 @@ import {
 
 import { saveUserProfile, getUserProfile } from "./db.js";
 
-// Global state variable
+// Global auth state — the single source of truth for current user
 let currentUser = null;
-let authMode = 'login'; // 'login' or 'signup'
+let authMode = 'login';
 let isSignupMode = false;
+
+/**
+ * getCurrentUser — safe public accessor for the confirmed auth state.
+ * Use this instead of auth.currentUser to avoid race conditions.
+ */
+export function getCurrentUser() {
+    return currentUser;
+}
 
 /**
  * Minimal Toast Notification System
@@ -72,44 +80,44 @@ function shakeModal() {
 }
 
 /**
- * The Watchman: Global state listener
+ * initAuth — The Auth-First Gatekeeper.
+ * @param {Function} onAuthResolved  - One-shot callback on first auth confirmation.
+ * @param {Function} [onAuthChange]  - Called on every subsequent auth state change (login/logout).
  */
-export function initAuth() {
-    // Ensure persistence is set to LOCAL
-    setPersistence(auth, browserLocalPersistence).catch(err => console.error("Persistence Error:", err));
+export function initAuth(onAuthResolved, onAuthChange) {
+    // Note: setPersistence is set once in firebase-config.js — not repeated here.
+    let hasBooted = false;
 
     onAuthStateChanged(auth, (user) => {
         currentUser = user;
-        console.log(user ? "User Authenticated:" : "User in Guest Mode", user?.email || "");
-        
-        // Sync the UI based on the new state
-        try {
-            syncAuthStateUI();
-        } catch (e) {
-            console.error("UI Sync Error:", e);
+        console.log(user ? "Auth: Authenticated →" : "Auth: Guest Mode", user?.email || "");
+
+        if (!hasBooted) {
+            // === FIRST RESOLUTION: unlock the app ===
+            hasBooted = true;
+            if (typeof onAuthResolved === 'function') onAuthResolved(user);
+        } else {
+            // === SUBSEQUENT CHANGES: login/logout after boot ===
+            if (typeof onAuthChange === 'function') onAuthChange(user);
         }
-        
-        // Dispatch custom event for features to react to auth changes
+
+        // Always sync the header/banner UI
+        try { syncAuthStateUI(); }
+        catch (e) { console.error("UI Sync Error:", e); }
+
         window.dispatchEvent(new CustomEvent('authChanged', { detail: { user } }));
     });
 
-    // Global Modal Click-Outside-to-Close listener
+    // Global Modal Click-Outside-to-Close
     window.addEventListener('click', (e) => {
         if (e.target.classList.contains('modal-overlay')) {
             const modalId = e.target.id;
-            if (modalId === 'auth-modal') {
-                closeAuthModal();
-            } else if (modalId === 'fear-popup') {
-                closeFearPopup();
-            } else if (modalId === 'diary-modal') {
-                // Assuming tracker handles its own modal closing but we can add it here if needed
-                if (window.tracker && window.tracker.closeDiary) {
-                    window.tracker.closeDiary();
-                } else {
-                    e.target.classList.add('hidden');
-                }
+            if (modalId === 'auth-modal') closeAuthModal();
+            else if (modalId === 'fear-popup') closeFearPopup();
+            else if (modalId === 'diary-modal') {
+                if (window.tracker?.closeDiary) window.tracker.closeDiary();
+                else e.target.classList.add('hidden');
             } else {
-                // Generic fallback
                 e.target.classList.add('hidden');
             }
         }
@@ -236,8 +244,13 @@ export async function handleSignup(email, password, confirmPassword, firstName, 
             marketingConsent
         });
         
-        // Phase 4.2: Secure Contact Sync (Background Process)
-        syncToBrevo(email, firstName, lastName);
+        // Phase 4.2: Secure Contact Sync (Background — production only)
+        // On localhost, /api/sync-contact is not served by Vite, so we skip it.
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            syncToBrevo(email, firstName, lastName);
+        } else {
+            console.log('Dev: Brevo sync skipped on localhost (runs only in production).');
+        }
 
         console.log("Signup process complete.");
         closeAuthModal();
@@ -510,10 +523,6 @@ export function closeFearPopup() {
     const fearPopup = document.getElementById('fear-popup');
     if (fearPopup) fearPopup.classList.add('hidden');
     sessionStorage.setItem('hasSeenLoginHook', 'true');
-}
-
-export function getCurrentUser() {
-    return currentUser;
 }
 
 // Expose to window for inline HTML handlers

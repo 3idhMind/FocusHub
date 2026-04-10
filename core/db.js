@@ -1,8 +1,12 @@
 /**
  * core/db.js
  * ROLE: Isolated module for all Firestore operations.
- * Schema: users_progress/{uid} -> { logs: { "YYYY-MM-DD": "completed" } }
+ *
+ * SCHEMA (v2 — Yearly Bucket):
+ *   users/{uid}                          → Identity Layer: { email, username, createdAt }
+ *   users/{uid}/tracker_data/{year}      → Yearly Bucket:  { logs: { "YYYY-MM-DD": {...} } }
  */
+
 
 import { db, auth } from "./firebase-config.js";
 export { db, auth };
@@ -11,21 +15,47 @@ import {
     setDoc, 
     getDoc,
     updateDoc,
-    deleteField
+    deleteField,
+    serverTimestamp
 } from "firebase/firestore";
+
 
 /**
  * ⚡ IN-MEMORY CACHE (Production-Grade Rate Limiting)
- * Eliminates redundant Firestore billing and network latency when navigating between modules.
+ *
+ * v2 Schema: Cache is keyed by year, not a single flat blob.
+ * This means navigating to a past year only costs 1 read ever (per session).
+ * Structure: { uid: string|null, years: { "2026": {...logs}, "2025": {...logs} } }
  */
 export let IN_MEMORY_CACHE = {
-    progress: null,
+    uid: null,
     profile: null,
-    uid: null
+    years: {}   // { [year]: { [dateKey]: logObject } }
 };
 
+/** Wipe the entire cache on logout / auth change. */
 export function invalidateCache() {
-    IN_MEMORY_CACHE = { progress: null, profile: null, uid: null };
+    IN_MEMORY_CACHE = { uid: null, profile: null, years: {} };
+    console.log('DB Cache: Invalidated.');
+}
+
+/** Internal: get cached logs for a specific year (or null if uncached). */
+function _getCachedYear(uid, year) {
+    if (IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.years[year] !== undefined) {
+        return IN_MEMORY_CACHE.years[year];
+    }
+    return null;
+}
+
+/** Internal: set cached logs for a specific year. */
+function _setCachedYear(uid, year, logs) {
+    IN_MEMORY_CACHE.uid = uid;
+    IN_MEMORY_CACHE.years[year] = logs;
+}
+
+/** Internal: extract the year string from a YYYY-MM-DD dateKey. */
+function _yearOf(dateKey) {
+    return dateKey.split('-')[0]; // "2026-04-10" → "2026"
 }
 
 /**
@@ -41,11 +71,81 @@ function requireAuth(uid) {
             : !auth.currentUser ? 'Firebase Auth not yet resolved (Guest Mode)'
             : 'UID mismatch (security violation)';
         console.warn(`DB Guard: Blocked Firestore call. Reason: ${reason}`);
-        // Return false to signal the caller to abort — never throw in background sync paths
         return false;
     }
     return true;
 }
+
+// ─────────────────────────────────────────────
+// PART 1 — IDENTITY LAYER
+// ─────────────────────────────────────────────
+
+/**
+ * generateUsername — Creates a random display handle.
+ * Format: "user_" + 6 random alphanumeric characters (e.g., "user_k7m2xp")
+ * Collision probability at 10k users: ~0.0015% — acceptable for a display handle.
+ * @returns {string}
+ */
+function generateUsername() {
+    return 'user_' + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * initUserProfile — Safe, idempotent profile bootstrapper.
+ *
+ * RULE: This function is the ONLY place a users/{uid} document is created.
+ *       It MUST run before getUserProfile() in the hydration sequence.
+ *
+ * Logic:
+ *   1. Check if users/{uid} exists.
+ *   2. If NOT exists → setDoc to create the canonical profile document.
+ *   3. If EXISTS    → Backfill any missing fields (username, createdAt)
+ *                     that may be absent on accounts created before schema v2.
+ *                     Never overwrites existing data.
+ *
+ * @param {import('firebase/auth').User} userAuth - The confirmed Firebase Auth user object.
+ */
+export async function initUserProfile(userAuth) {
+    if (!userAuth?.uid) return;
+    if (!requireAuth(userAuth.uid)) return;
+
+    const docRef = doc(db, 'users', userAuth.uid);
+
+    try {
+        const docSnap = await getDoc(docRef);
+
+        if (!docSnap.exists()) {
+            // ── NEW USER: Create the canonical profile document ──
+            await setDoc(docRef, {
+                email:     userAuth.email,
+                username:  generateUsername(),
+                createdAt: serverTimestamp(),
+            });
+            console.log(`Identity: Profile created for UID: ${userAuth.uid}`);
+
+        } else {
+            // ── EXISTING USER: Backfill missing v2 schema fields only ──
+            const data = docSnap.data();
+            const missing = {};
+            if (!data.username)  missing.username  = generateUsername();
+            if (!data.createdAt) missing.createdAt = serverTimestamp();
+
+            if (Object.keys(missing).length > 0) {
+                // updateDoc preserves all existing fields — no overwrite risk
+                await updateDoc(docRef, missing);
+                console.log(`Identity: Backfilled missing fields for UID: ${userAuth.uid}`, Object.keys(missing));
+            } else {
+                console.log(`Identity: Profile already up-to-date for UID: ${userAuth.uid}`);
+            }
+        }
+    } catch (error) {
+        // ISOLATION: Do NOT rethrow. A failure here (network blip, rules mismatch)
+        // must never block _hydrate from loading the user's logs and profile.
+        // The profile document will be created/backfilled on the next successful login.
+        console.warn(`Identity: initUserProfile failed (non-fatal). Will retry on next login.`, error.message);
+    }
+}
+
 
 /**
  * Helper to fetch a document with a timeout.
@@ -101,11 +201,23 @@ function handleFirestoreError(error, operationType, path) {
     throw new Error(JSON.stringify(errInfo));
 }
 
+// ─────────────────────────────────────────────
+// PART 2 — YEARLY BUCKET ENGINE
+//   Path: users/{uid}/tracker_data/{year}
+//   All writes use atomic dot-notation updateDoc.
+// ─────────────────────────────────────────────
+
 /**
- * Update the status for a specific date.
- * @param {string} uid - User ID
- * @param {string} dateKey - The date key in YYYY-MM-DD format
- * @param {string} status - 'completed', 'skipped', or 'pending'
+ * _getYearDocRef — Returns the Firestore reference for a year bucket.
+ * @param {string} uid
+ * @param {string} year - e.g. "2026"
+ */
+function _getYearDocRef(uid, year) {
+    return doc(db, 'users', uid, 'tracker_data', year);
+}
+
+/**
+ * updateDateStatus — Convenience wrapper, kept for legacy compat.
  */
 export async function updateDateStatus(uid, dateKey, status) {
     if (!requireAuth(uid)) return;
@@ -113,10 +225,7 @@ export async function updateDateStatus(uid, dateKey, status) {
 }
 
 /**
- * Update the note for a specific date.
- * @param {string} uid - User ID
- * @param {string} dateKey - The date key in YYYY-MM-DD format
- * @param {string} note - The user's note
+ * updateDateNote — Convenience wrapper, kept for legacy compat.
  */
 export async function updateDateNote(uid, dateKey, note) {
     if (!requireAuth(uid)) return;
@@ -124,142 +233,123 @@ export async function updateDateNote(uid, dateKey, note) {
 }
 
 /**
- * Update both status and note for a specific date.
- * @param {string} uid - User ID
- * @param {string} dateKey - The date key in YYYY-MM-DD format
- * @param {string} status - 'completed', 'skipped', or 'pending'
- * @param {string} note - The user's note
- */
-/**
- * Update both status and note for a specific date.
- * @param {string} uid - User ID
- * @param {string} dateKey - The date key in YYYY-MM-DD format
- * @param {string} status - 'completed', 'skipped', or 'pending'
- * @param {string} note - The user's note
+ * updateDayLog — Atomic write to the Yearly Bucket.
+ *
+ * CONCURRENCY SAFETY RULES (must never be broken):
+ *   1. ALL updates use `updateDoc` with dot-notation → only the target field is touched.
+ *   2. If the year document doesn't exist yet (first log of that year), `updateDoc`
+ *      throws a "not-found" error. We catch it and use `setDoc` with `{merge:true}`
+ *      to create the bucket safely. This is the ONLY place `setDoc` is used for logs.
+ *   3. NEVER call `setDoc` on an existing year document — doing so replaces ALL logs.
+ *
+ * @param {string} uid
+ * @param {string} dateKey - "YYYY-MM-DD"
+ * @param {string|undefined} status
+ * @param {string|undefined} note
+ * @param {boolean} inTrash
  */
 export async function updateDayLog(uid, dateKey, status, note, inTrash = false) {
     if (!uid || !dateKey) return;
     if (!requireAuth(uid)) return;
 
-    const docRef = doc(db, "users_progress", uid);
-    const path = `users_progress/${uid}`;
-    
-    try {
-        // Enforce 500-character limit for notes
-        if (note && note.length > 500) {
-            throw new Error("Note exceeds 500 characters limit.");
-        }
+    // Note validation
+    if (note && note.length > 500) {
+        throw new Error('Note exceeds 500 characters limit.');
+    }
 
-        // We use updateDoc with dot notation for precise merging.
-        // But first we must ensure the document exists.
-        // Read from cache if possible to save database quota
-        let docExists = false;
-        let existingLog = null;
-        
-        if (IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.progress !== null) {
-            // If cache exists, the document exists
-            docExists = true;
-            existingLog = IN_MEMORY_CACHE.progress[dateKey];
-        } else {
-            // Uncached, so query
-            const docSnap = await getDocWithTimeout(docRef);
-            docExists = docSnap.exists();
-            if (docExists) {
-                existingLog = docSnap.data().logs?.[dateKey];
-            }
-        }
-        
-        // Prevent phantom database writes if nothing actually changed
-        if (existingLog && typeof existingLog !== 'string') {
+    const year    = _yearOf(dateKey);            // "2026"
+    const docRef  = _getYearDocRef(uid, year);  // users/{uid}/tracker_data/2026
+    const path    = `users/${uid}/tracker_data/${year}`;
+
+    // ── Phantom Write Guard ──────────────────────────────────────────────────
+    // Skip if nothing actually changed (reads from cache — zero network cost).
+    const cached = _getCachedYear(uid, year);
+    if (cached) {
+        const existing = cached[dateKey];
+        if (existing && typeof existing === 'object') {
             let hasChanges = false;
-            if (status !== undefined && existingLog.status !== status) hasChanges = true;
-            if (note !== undefined && existingLog.note !== note) hasChanges = true;
-            if (inTrash !== undefined && existingLog.inTrash !== inTrash) hasChanges = true;
-
+            if (status !== undefined && existing.status !== status) hasChanges = true;
+            if (note   !== undefined && existing.note   !== note)   hasChanges = true;
+            if (inTrash !== undefined && existing.inTrash !== inTrash) hasChanges = true;
             if (!hasChanges) {
                 console.log(`⚡ Phantom Write Prevented: No changes for ${dateKey}`);
-                return; // Nothing changed, skip completely
+                return;
             }
         }
-        
-        if (!docExists) {
-            // Create initial document
-            await setDoc(docRef, { 
-                logs: { 
-                    [dateKey]: { 
-                        status: status || 'pending', 
-                        note: note || '', 
-                        inTrash: inTrash || false,
-                        deletedAt: inTrash ? new Date().toISOString() : null,
-                        updatedAt: new Date().toISOString()
-                    } 
-                } 
-            });
-            // Update Cache
-            if (IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.progress) {
-                IN_MEMORY_CACHE.progress[dateKey] = { status: status || 'pending', note: note || '', inTrash: inTrash || false };
+    }
+
+    // ── Build the atomic update payload ─────────────────────────────────────
+    // Each key is a dot-notation path targeting ONLY the specific field.
+    // Firestore guarantees other keys in the same document are untouched.
+    const updatePayload = {};
+    if (status  !== undefined) updatePayload[`logs.${dateKey}.status`]    = status;
+    if (note    !== undefined) updatePayload[`logs.${dateKey}.note`]      = note;
+    if (inTrash !== undefined) {
+        updatePayload[`logs.${dateKey}.inTrash`] = inTrash;
+        if (inTrash === true) {
+            updatePayload[`logs.${dateKey}.deletedAt`] = new Date().toISOString();
+        } else {
+            updatePayload[`logs.${dateKey}.deletedAt`] = deleteField();
+        }
+    }
+    updatePayload[`logs.${dateKey}.updatedAt`] = new Date().toISOString();
+
+    try {
+        // ── PRIMARY PATH: Atomic updateDoc ───────────────────────────────────
+        await updateDoc(docRef, updatePayload);
+
+    } catch (firstWriteError) {
+        // ── FALLBACK PATH: First log of this year (doc doesn't exist yet) ────
+        // updateDoc throws 'not-found' when the year bucket has never been created.
+        // We bootstrap the document safely with setDoc + merge:true.
+        // merge:true means: create if absent, merge if present — never overwrites.
+        if (firstWriteError?.code === 'not-found') {
+            try {
+                const bootstrapPayload = {
+                    logs: {
+                        [dateKey]: {
+                            status:    status    !== undefined ? status    : 'pending',
+                            note:      note      !== undefined ? note      : '',
+                            inTrash:   inTrash   !== undefined ? inTrash   : false,
+                            deletedAt: inTrash === true ? new Date().toISOString() : null,
+                            updatedAt: new Date().toISOString(),
+                        }
+                    }
+                };
+                await setDoc(docRef, bootstrapPayload, { merge: true });
+                console.log(`DB: Bootstrapped new year bucket [${year}] for UID: ${uid}`);
+            } catch (bootstrapError) {
+                handleFirestoreError(bootstrapError, OperationType.WRITE, path);
+                return;
             }
         } else {
-            const updateData = {};
-            
-            // If existing log is a string (old format), we must overwrite it with an object
-            if (typeof existingLog === 'string') {
-                updateData[`logs.${dateKey}`] = {
-                    status: status !== undefined ? status : existingLog,
-                    note: note !== undefined ? note : '',
-                    inTrash: inTrash !== undefined ? inTrash : false,
-                    deletedAt: inTrash === true ? new Date().toISOString() : null,
-                    updatedAt: new Date().toISOString()
-                };
-            } else {
-                // Standard nested update using dot notation for safety
-                if (status !== undefined) updateData[`logs.${dateKey}.status`] = status;
-                if (note !== undefined) updateData[`logs.${dateKey}.note`] = note;
-                
-                if (inTrash !== undefined) {
-                    updateData[`logs.${dateKey}.inTrash`] = inTrash;
-                    if (inTrash === true) {
-                        updateData[`logs.${dateKey}.deletedAt`] = new Date().toISOString();
-                    } else {
-                        // If restoring, clear the deletedAt field
-                        updateData[`logs.${dateKey}.deletedAt`] = deleteField();
-                    }
-                }
-                
-                updateData[`logs.${dateKey}.updatedAt`] = new Date().toISOString();
-            }
-            
-            await updateDoc(docRef, updateData);
-            
-            // Sync cache to remain fresh
-            if (IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.progress) {
-                if (typeof existingLog === 'string') {
-                    IN_MEMORY_CACHE.progress[dateKey] = {
-                        status: status !== undefined ? status : existingLog,
-                        note: note !== undefined ? note : '',
-                        inTrash: inTrash !== undefined ? inTrash : false
-                    };
-                } else {
-                    if (!IN_MEMORY_CACHE.progress[dateKey]) IN_MEMORY_CACHE.progress[dateKey] = {};
-                    if (status !== undefined) IN_MEMORY_CACHE.progress[dateKey].status = status;
-                    if (note !== undefined) IN_MEMORY_CACHE.progress[dateKey].note = note;
-                    if (inTrash !== undefined) IN_MEMORY_CACHE.progress[dateKey].inTrash = inTrash;
-                }
-            }
+            // Any other error (permissions, network) — surface it normally
+            handleFirestoreError(firstWriteError, OperationType.WRITE, path);
+            return;
         }
-        
-        console.log(`Cloud Sync: Updated ${dateKey} (status: ${status}, inTrash: ${inTrash})`);
-    } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, path);
     }
+
+    // ── Sync in-memory cache ─────────────────────────────────────────────────
+    const yearCache = _getCachedYear(uid, year) || {};
+    if (!yearCache[dateKey]) yearCache[dateKey] = {};
+    if (status  !== undefined) yearCache[dateKey].status  = status;
+    if (note    !== undefined) yearCache[dateKey].note    = note;
+    if (inTrash !== undefined) yearCache[dateKey].inTrash = inTrash;
+    if (inTrash === true)  yearCache[dateKey].deletedAt = new Date().toISOString();
+    if (inTrash === false) delete yearCache[dateKey].deletedAt;
+    _setCachedYear(uid, year, yearCache);
+
+    console.log(`Cloud Sync ✓ [${year}] ${dateKey} — status: ${status}, inTrash: ${inTrash}`);
 }
 
 /**
- * Specifically update the inTrash status for a date.
+ * updateInTrash — Soft-delete or restore a day's log.
+ * Thin wrapper over updateDayLog to preserve state.js call signature.
  */
 export async function updateInTrash(uid, dateKey, inTrash) {
     return updateDayLog(uid, dateKey, undefined, undefined, inTrash);
 }
+
 
 /**
  * Load user profile data from Firestore.
@@ -320,66 +410,49 @@ export async function saveUserProfile(uid, profileData) {
 }
 
 /**
- * Load all progress data for a user.
- * Includes a migration step to fix corrupted dot-notation fields.
- * @param {string} uid - User ID
- * @returns {Object} - The logs map from Firestore
+ * loadProgress — Load all logs for a specific year from the Yearly Bucket.
+ *
+ * v2 Schema: reads users/{uid}/tracker_data/{year}
+ * Default year is the current calendar year.
+ *
+ * Cost Model: 1 document read per year per session.
+ * Cached: subsequent calls for the same year return in-memory data (0 reads).
+ *
+ * @param {string} uid
+ * @param {number|string} [year] - Defaults to current year
+ * @param {boolean} [forceRefresh]
+ * @returns {Object} - The logs map: { "YYYY-MM-DD": { status, note, inTrash, ... } }
  */
-export async function loadProgress(uid, forceRefresh = false) {
+export async function loadProgress(uid, year = new Date().getFullYear(), forceRefresh = false) {
     if (!uid) return {};
     if (!requireAuth(uid)) return {};
 
-    if (!forceRefresh && IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.progress !== null) {
-        console.log("⚡ Network Saved: Returning logs from cache.");
-        return IN_MEMORY_CACHE.progress;
+    const yearStr = String(year);
+
+    // ── Cache Hit ─────────────────────────────────────────────────────────────
+    if (!forceRefresh) {
+        const cached = _getCachedYear(uid, yearStr);
+        if (cached !== null) {
+            console.log(`⚡ Network Saved: Returning [${yearStr}] logs from cache.`);
+            return cached;
+        }
     }
 
-    const docRef = doc(db, "users_progress", uid);
-    const path = `users_progress/${uid}`;
-    
+    // ── Cache Miss: Fetch from Firestore ──────────────────────────────────────
+    const docRef = _getYearDocRef(uid, yearStr);
+    const path   = `users/${uid}/tracker_data/${yearStr}`;
+
     try {
         const docSnap = await getDocWithTimeout(docRef);
         if (docSnap.exists()) {
-            const data = docSnap.data();
-            const logs = data.logs || {};
-            
-            // Migration: Check for corrupted root-level fields starting with "logs."
-            // These were created by a previous bug using setDoc with dot-notation keys.
-            const corruptedKeys = Object.keys(data).filter(k => k.startsWith('logs.'));
-            if (corruptedKeys.length > 0) {
-                console.warn(`Data Migration: Found ${corruptedKeys.length} corrupted fields. Repairing...`);
-                const repairData = {};
-                const deleteData = {};
-                
-                corruptedKeys.forEach(key => {
-                    // key is like "logs.2024-01-01.status"
-                    const parts = key.split('.');
-                    if (parts.length >= 3) {
-                        const date = parts[1];
-                        const field = parts[2];
-                        
-                        if (!logs[date]) logs[date] = {};
-                        if (typeof logs[date] === 'string') {
-                            // Convert old string format to object
-                            logs[date] = { status: logs[date] };
-                        }
-                        
-                        logs[date][field] = data[key];
-                        deleteData[key] = deleteField();
-                    }
-                });
-                
-                // Save repaired logs and delete corrupted fields
-                await updateDoc(docRef, { ...deleteData, logs: logs });
-                console.log("Data Migration: Repair complete.");
-            }
-            
-            IN_MEMORY_CACHE.uid = uid;
-            IN_MEMORY_CACHE.progress = logs;
+            const logs = docSnap.data().logs || {};
+            _setCachedYear(uid, yearStr, logs);
+            console.log(`DB: Loaded ${Object.keys(logs).length} logs for [${yearStr}].`);
             return logs;
         } else {
-            IN_MEMORY_CACHE.uid = uid;
-            IN_MEMORY_CACHE.progress = {};
+            // No data for this year yet — cache the empty result to prevent repeat reads.
+            _setCachedYear(uid, yearStr, {});
+            console.log(`DB: No data found for [${yearStr}]. Returning empty.`);
             return {};
         }
     } catch (error) {
@@ -389,28 +462,36 @@ export async function loadProgress(uid, forceRefresh = false) {
 }
 
 /**
- * Permanently delete a log entry for a specific date.
- * @param {string} uid - User ID
- * @param {string} dateKey - The date key in YYYY-MM-DD format
+ * deleteDayLog — Permanently remove a single day's log from its year bucket.
+ *
+ * Uses atomic dot-notation deleteField() so only the target date key is removed.
+ * All other dates in the same year document are untouched.
+ *
+ * @param {string} uid
+ * @param {string} dateKey - "YYYY-MM-DD"
  */
 export async function deleteDayLog(uid, dateKey) {
     if (!uid || !dateKey) return;
     if (!requireAuth(uid)) return;
 
-    const docRef = doc(db, "users_progress", uid);
-    const path = `users_progress/${uid}`;
-    
+    const year   = _yearOf(dateKey);
+    const docRef = _getYearDocRef(uid, year);
+    const path   = `users/${uid}/tracker_data/${year}`;
+
     try {
-        const updateData = {};
-        updateData[`logs.${dateKey}`] = deleteField();
-        
-        await updateDoc(docRef, updateData);
-        
-        if (IN_MEMORY_CACHE.uid === uid && IN_MEMORY_CACHE.progress) {
-            delete IN_MEMORY_CACHE.progress[dateKey];
+        // Atomic field-level delete — other dates in this year are safe
+        await updateDoc(docRef, {
+            [`logs.${dateKey}`]: deleteField()
+        });
+
+        // Remove from cache
+        const yearCache = _getCachedYear(uid, year);
+        if (yearCache) {
+            delete yearCache[dateKey];
+            _setCachedYear(uid, year, yearCache);
         }
-        
-        console.log(`Cloud Sync: Permanently deleted log for ${dateKey}`);
+
+        console.log(`Cloud Sync ✓ Permanently deleted log: ${dateKey}`);
     } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, path);
     }

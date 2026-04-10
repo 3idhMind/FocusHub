@@ -18,12 +18,14 @@
 import {
     loadProgress,
     getUserProfile,
+    initUserProfile,
     updateDayLog,
     updateInTrash,
     deleteDayLog,
     saveUserProfile,
     invalidateCache,
 } from './db.js';
+
 
 
 // ─────────────────────────────────────────────
@@ -130,6 +132,12 @@ async function _hydrate(user) {
     globalState.isLoading = true;
 
     try {
+        // STEP 1: Ensure users/{uid} document exists and has all v2 schema fields.
+        // This is idempotent — safe to call on every login.
+        // Must run BEFORE getUserProfile() so the document is guaranteed to exist.
+        await initUserProfile(user);
+
+        // STEP 2: Parallel-fetch logs and profile now that the document is confirmed.
         const [logs, profile] = await Promise.all([
             loadProgress(user.uid),
             getUserProfile(user.uid)

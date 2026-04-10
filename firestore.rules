@@ -2,16 +2,17 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Assumed Data Model
+    // Schema v2 — Yearly Bucket
     // ===============================================================
     //
-    // Collection: users_progress
-    // Document ID: {uid}
-    // Fields:
-    //   - logs: map (required) - A map of date strings (YYYY-MM-DD) to log objects
-    //     - status: string (optional, enum: ['completed', 'skipped', 'pending'])
-    //     - note: string (optional, max 500 chars)
-    //     - tasks: list (optional, max 50 items)
+    // users/{uid}
+    //   → Identity Layer: { email, username, createdAt, firstName?, lastName? }
+    //
+    // users/{uid}/tracker_data/{year}
+    //   → Yearly Bucket: { logs: { "YYYY-MM-DD": { status, note, inTrash, ... } } }
+    //   → One document per calendar year. All writes use atomic dot-notation.
+    //
+    // users_progress/{uid}  [LEGACY — read-only, for data migration only]
     //
     // ===============================================================
 
@@ -49,14 +50,16 @@ service cloud.firestore {
              data.logs is map;
     }
 
-    // Domain Validator for User Profile
+    // Domain Validator for User Profile (Schema v2)
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['firstName', 'lastName', 'email', 'marketingConsent', 'updatedAt']) &&
-             data.firstName is string && data.firstName.size() <= 50 &&
-             data.lastName is string && data.lastName.size() <= 50 &&
+      return hasOnlyAllowedFields(['firstName', 'lastName', 'email', 'marketingConsent', 'updatedAt', 'username', 'createdAt']) &&
              data.email is string && isValidEmail(data.email) && data.email.size() <= 100 &&
-             data.marketingConsent is bool &&
-             (!('updatedAt' in data) || isValidDateString(data.updatedAt));
+             (!('firstName' in data) || (data.firstName is string && data.firstName.size() <= 50)) &&
+             (!('lastName' in data) || (data.lastName is string && data.lastName.size() <= 50)) &&
+             (!('marketingConsent' in data) || data.marketingConsent is bool) &&
+             (!('username' in data) || (data.username is string && data.username.size() <= 30)) &&
+             (!('updatedAt' in data) || isValidDateString(data.updatedAt)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
     }
 
     // Domain Validator for Syllabus
@@ -73,17 +76,35 @@ service cloud.firestore {
           (request.auth.token.email == "shivamrathor12344@gmail.com" && request.auth.token.email_verified == true)); // Default admin
     }
 
-    // Allow users to read and write only their own progress data
+    // LEGACY: users_progress — kept READ-ONLY for data migration tooling.
+    // New writes go to users/{uid}/tracker_data/{year}.
+    // This rule can be removed once all data is migrated.
     match /users_progress/{uid} {
       allow read: if isOwner(uid) || isAdmin();
-      
-      // For create and update, we ensure the user is the owner and the data structure is valid
-      allow create: if isOwner(uid) && isValidUserProgress(request.resource.data);
-      
-      allow update: if isOwner(uid) && 
-                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['logs']) || 
-                     isValidUserProgress(request.resource.data));
+      allow write: if false; // No new writes to the legacy collection
     }
+
+    // Tracker Data — Yearly Bucket
+    // Path: users/{uid}/tracker_data/{year}
+    match /users/{uid}/tracker_data/{year} {
+      // Only the document owner can read their own tracker data
+      allow read: if isOwner(uid);
+
+      // On create: the document must have a valid "logs" map
+      allow create: if isOwner(uid) &&
+                    request.resource.data.keys().hasOnly(['logs']) &&
+                    request.resource.data.logs is map &&
+                    // Safety: cap entries per year doc (365 days + buffer)
+                    request.resource.data.logs.size() <= 400;
+
+      // On update: only the logs map can change, and it cannot exceed the cap
+      allow update: if isOwner(uid) &&
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['logs']) &&
+                    request.resource.data.logs.size() <= 400;
+
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
 
     // User Profile Rules
     match /users/{uid} {

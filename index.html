@@ -110,7 +110,7 @@
                         </div>
 
                         <div id="forgot-password-container" class="auth-extra">
-                            <a href="#" onclick="auth.showResetMode()">Forgot Password?</a>
+                            <a href="#">Forgot Password?</a>
                         </div>
                         <button id="auth-submit-btn" class="auth-primary-btn" onclick="auth.handleAuthSubmit()">Continue</button>
                     </div>
@@ -119,14 +119,37 @@
                     </div>
                 </div>
 
-                <!-- Reset Password View -->
+                <!-- Reset Password View (Step 1: Request) -->
                 <div id="reset-password-view" class="hidden">
                     <div class="auth-form">
                         <input type="email" id="reset-email" placeholder="Email Address">
-                        <button class="auth-primary-btn" onclick="auth.handlePasswordResetClick()">Send Reset Link</button>
+                        <button class="auth-primary-btn" onclick="auth.handlePasswordResetNext()">Continue</button>
                     </div>
                     <div class="auth-footer">
                         <p class="toggle-auth"><a href="#" onclick="auth.showLoginMode()">Back to Login</a></p>
+                    </div>
+                </div>
+
+                <!-- Reset Confirmation View (Step 2: Confirm) -->
+                <div id="reset-confirm-view" class="hidden">
+                    <div class="auth-header" style="text-align: center; margin-bottom: 24px;">
+                        <p id="reset-confirm-text" style="color: rgba(255,255,255,0.8); line-height: 1.6;"></p>
+                    </div>
+                    <div class="auth-form" style="gap: 12px;">
+                        <button class="auth-primary-btn" onclick="auth.handlePasswordResetClick()">Send Reset Link</button>
+                        <button class="auth-secondary-btn" onclick="auth.showResetMode()">Edit Email</button>
+                    </div>
+                </div>
+
+                <!-- Reset Success View (Step 3: Instructions) -->
+                <div id="reset-success-view" class="hidden">
+                    <div class="auth-header" style="text-align: center; margin-bottom: 24px;">
+                        <span style="font-size: 3rem; display: block; margin-bottom: 16px;">✉️</span>
+                        <h2 style="font-size: 1.5rem; color: var(--muted-gold);">Check your inbox</h2>
+                        <p style="color: rgba(255,255,255,0.7); line-height: 1.5; margin-top: 12px;">If an account exists for <strong id="reset-success-email"></strong>, a password reset link has been sent. Please check your inbox/spam folder.</p>
+                    </div>
+                    <div class="auth-form">
+                        <button class="auth-primary-btn" onclick="auth.showLoginMode()">Back to Login</button>
                     </div>
                 </div>
 
@@ -140,6 +163,37 @@
                     <div class="auth-form" style="gap: 12px;">
                         <button class="auth-primary-btn" onclick="auth.switchToLoginFromExists()">Log in with this account</button>
                         <button class="auth-secondary-btn" onclick="auth.switchToSignupFromExists()">Are you want to create a new account?</button>
+                    </div>
+                </div>
+
+                <!-- Update Password View (From Email Link) -->
+                <div id="update-password-view" class="hidden">
+                    <div class="auth-header" style="text-align: center; margin-bottom: 24px;">
+                        <h2 style="font-size: 1.5rem; color: var(--muted-gold);">Create New Password</h2>
+                        <p style="color: rgba(255,255,255,0.7); line-height: 1.5; margin-top: 12px;">Please enter your new password twice.</p>
+                    </div>
+                    <div class="auth-form" style="padding: 10px 0;">
+                        <div class="input-group">
+                            <label for="update-password-input">Password</label>
+                            <input type="password" id="update-password-input" placeholder="Min 6 characters">
+                        </div>
+                        <div class="input-group" style="margin-top: 12px;">
+                            <label for="update-password-confirm">Confirm Password</label>
+                            <input type="password" id="update-password-confirm" placeholder="Repeat new password">
+                        </div>
+                        <button class="auth-primary-btn" id="update-password-btn" onclick="auth.handleUpdatePasswordAction()" style="margin-top: 20px;">Save New Password</button>
+                    </div>
+                </div>
+
+                <!-- Reset Error View (Expired/Used Link) -->
+                <div id="reset-error-view" class="hidden">
+                    <div class="auth-header" style="text-align: center; margin-bottom: 24px;">
+                        <span style="font-size: 3rem; display: block; margin-bottom: 16px;">⏳</span>
+                        <h2 style="font-size: 1.5rem; color: #ff6b6b;">Link Expired</h2>
+                        <p style="color: rgba(255,255,255,0.7); line-height: 1.5; margin-top: 12px;">This reset link has either expired or has already been used.</p>
+                    </div>
+                    <div class="auth-form">
+                        <button class="auth-primary-btn" onclick="auth.showResetMode()">Request New Link</button>
                     </div>
                 </div>
             </div>
@@ -175,8 +229,19 @@
         </div>
     </div>
 
-    <!-- Minimal Toast Notification -->
-    <div id="toast-container" class="toast-container"></div>
+    <!-- General Confirmation Modal (Reusable Premium UI) -->
+    <div id="general-confirm-modal" class="modal-overlay hidden">
+        <div class="modal-content confirm-content">
+            <div class="confirm-header">
+                <h2 id="confirm-modal-title">Are you sure?</h2>
+                <p id="confirm-modal-text">This action cannot be undone.</p>
+            </div>
+            <div class="confirm-actions">
+                <button id="confirm-modal-yes" class="auth-primary-btn">Confirm</button>
+                <button id="confirm-modal-no" class="auth-secondary-btn" onclick="auth.closeConfirmModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
 </body>

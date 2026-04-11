@@ -14,12 +14,15 @@ import {
     signOut, 
     onAuthStateChanged,
     sendPasswordResetEmail,
+    confirmPasswordReset,
+    verifyPasswordResetCode,
     updateProfile,
     setPersistence,
     browserLocalPersistence
 } from "firebase/auth";
 
 import { saveUserProfile, getUserProfile } from "./db.js";
+import { subscribe, dispatchNotification, dispatchSetAuthView } from "./state.js";
 
 // Global auth state — the single source of truth for current user
 let currentUser = null;
@@ -121,7 +124,117 @@ export function initAuth(onAuthResolved, onAuthChange) {
                 e.target.classList.add('hidden');
             }
         }
+
+        // --- NEW: Forgot Password Link Listener (Login Page) ---
+        // Uses a more robust selector to handle bubbling correctly
+        const forgotLink = e.target.closest('a');
+        if (forgotLink && forgotLink.parentElement?.id === 'forgot-password-container') {
+            e.preventDefault(); 
+            console.log("Auth: Forgot Password link clicked. Swapping view...");
+            handleForgotPassword();
+        }
     });
+
+    // --- NEW: Notification Bridge ---
+    // Persistent listener that survives the initState purge.
+    subscribe('notification', ({ message }) => {
+        showToast(message);
+    }, { persistent: true });
+
+    // --- NEW: Auth View Bridge ---
+    // Persistent listener that ensures the Auth UI remains responsive across all states.
+    subscribe('authViewUpdated', ({ authView: newView }) => {
+        console.log("Auth UI: Syncing to view:", newView);
+        _syncViewToDOM(newView);
+    }, { persistent: true });
+
+    // --- NEW: URL Interceptor (Handle Password Reset Links) ---
+    checkEmailActions();
+}
+
+/**
+ * _syncViewToDOM: Low-level DOM toggler for the auth modal views.
+ */
+function _syncViewToDOM(view) {
+    const mainView = document.getElementById('auth-main-view');
+    const resetView = document.getElementById('reset-password-view');
+    const resetConfirmView = document.getElementById('reset-confirm-view');
+    const resetSuccessView = document.getElementById('reset-success-view');
+    const existsView = document.getElementById('account-exists-view');
+    const updatePasswordView = document.getElementById('update-password-view');
+    const resetErrorView = document.getElementById('reset-error-view');
+    
+    // Header elements
+    const title = document.getElementById('auth-title');
+    const subtitle = document.getElementById('auth-subtitle');
+    
+    // Input/Populate elements
+    const resetEmailInput = document.getElementById('reset-email');
+    const loginEmailInput = document.getElementById('auth-email');
+
+    // Hide all first
+    const views = [mainView, resetView, resetConfirmView, resetSuccessView, existsView, updatePasswordView, resetErrorView];
+    views.forEach(v => v?.classList.add('hidden'));
+
+    if (view === 'login' || view === 'signup') {
+        mainView?.classList.remove('hidden');
+        if (title) {
+            title.style.display = 'block';
+            title.innerHTML = isSignupMode ? "Focus<br>Create Account" : "Focus<br>Login";
+        }
+        if (subtitle) {
+            subtitle.style.display = 'block';
+            subtitle.innerText = isSignupMode 
+                ? "Join Focus to secure your progress and sync across devices." 
+                : "Log in to secure your progress and sync across devices.";
+        }
+    } else if (view === 'reset') {
+        resetView?.classList.remove('hidden');
+        if (title) {
+            title.style.display = 'block';
+            title.innerText = "Reset Password";
+        }
+        if (subtitle) {
+            subtitle.style.display = 'block';
+            subtitle.innerText = "Enter your email address and we'll send you a link to reset your password.";
+        }
+        // Pre-fill email from login form if available
+        if (resetEmailInput && loginEmailInput && loginEmailInput.value) {
+            resetEmailInput.value = loginEmailInput.value;
+        }
+    } else if (view === 'reset-confirm') {
+        resetConfirmView?.classList.remove('hidden');
+        if (title) title.innerText = "Confirm Email";
+        
+        // Populate specific confirm text
+        const email = resetEmailInput?.value || "your email";
+        const confirmText = document.getElementById('reset-confirm-text');
+        if (confirmText) confirmText.innerHTML = `Send password reset link to <br><strong>${email}</strong>?`;
+        
+    } else if (view === 'reset-success') {
+        resetSuccessView?.classList.remove('hidden');
+        if (title) title.style.display = 'none';
+        if (subtitle) subtitle.style.display = 'none';
+        
+        // Populate specific success text
+        const successEmail = document.getElementById('reset-success-email');
+        if (successEmail) successEmail.innerText = resetEmailInput?.value || "your inbox";
+        
+    } else if (view === 'exists') {
+        existsView?.classList.remove('hidden');
+        if (title) title.style.display = 'none';
+        if (subtitle) subtitle.style.display = 'none';
+    } else if (view === 'update-password') {
+        const updatePasswordView = document.getElementById('update-password-view');
+        updatePasswordView?.classList.remove('hidden');
+        if (title) title.style.display = 'none';
+        if (subtitle) subtitle.style.display = 'none';
+    } else if (view === 'reset-error') {
+        const resetErrorView = document.getElementById('reset-error-view');
+        resetErrorView?.classList.remove('hidden');
+        if (title) title.style.display = 'none';
+        if (subtitle) subtitle.style.display = 'none';
+    }
 }
 
 /**
@@ -337,25 +450,177 @@ export function switchToSignupFromExists() {
     }
 }
 
+export async function handleForgotPassword(emailInput = null) {
+    // SCENARIO 1: Profile Page (Email provided or logged in)
+    if (currentUser || emailInput) {
+        const email = emailInput || currentUser?.email;
+        if (email) {
+            requestProfilePasswordReset(email);
+            return;
+        }
+    }
+
+    // SCENARIO 2: Login Modal (Link clicked)
+    // Force set the view via state.js bridge
+    dispatchSetAuthView('reset');
+}
+
 /**
- * Handle Password Reset
+ * requestProfilePasswordReset — Profile-specific confirmation flow.
+ */
+export function requestProfilePasswordReset(email) {
+    // Replace window.confirm with our premium custom modal
+    openConfirmModal(
+        "Reset Password",
+        `Are you sure you want to send a password reset link to ${email}?`,
+        () => _performPasswordReset(email)
+    );
+}
+
+/**
+ * _performPasswordReset — The actual Firebase call.
+ */
+async function _performPasswordReset(email) {
+    try {
+        console.log("Auth: Sending reset link to", email);
+        await sendPasswordResetEmail(auth, email);
+        
+        // Success state depends on current context
+        if (!currentUser) {
+            // Guest context: Switch to success view in modal
+            dispatchSetAuthView('reset-success');
+        } else {
+            // Auth context (Profile): Just show toast
+            dispatchNotification("Reset link sent! Please check your inbox.", "success");
+        }
+        
+    } catch (error) {
+        console.error("Auth: Reset Error", error.code);
+        shakeModal();
+        
+        let msg = error.message;
+        if (error.code === 'auth/user-not-found') msg = "No account found with this email.";
+        else if (error.code === 'auth/invalid-email') msg = "Please enter a valid email address.";
+        else if (error.code === 'auth/too-many-requests') msg = "Too many requests. Please try later.";
+        
+        dispatchNotification(msg, "error");
+    }
+}
+
+/**
+ * checkEmailActions — Detects Firebase action URLs (e.g., password reset links).
+ * Runs on page load via initAuth().
+ */
+export async function checkEmailActions() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    const oobCode = urlParams.get('oobCode');
+
+    if (mode === 'resetPassword' && oobCode) {
+        console.log("Auth: Detected Password Reset Link. Verifying...");
+        
+        try {
+            // Verify if the link is still valid (not used, not expired)
+            await verifyPasswordResetCode(auth, oobCode);
+            
+            // Link is valid, store code and open update view
+            window._pendingOobCode = oobCode;
+            dispatchSetAuthView('update-password');
+            openAuthModal();
+            
+        } catch (error) {
+            console.error("Auth: Password Reset Verification Failed", error.code);
+            // Link is invalid or expired
+            dispatchSetAuthView('reset-error');
+            openAuthModal();
+        }
+    }
+}
+
+/**
+ * handleUpdatePasswordAction — Wrapper for HTML button to trigger the update.
+ */
+export async function handleUpdatePasswordAction() {
+    const passwordInput = document.getElementById('update-password-input');
+    const confirmInput = document.getElementById('update-password-confirm');
+    const newPassword = passwordInput?.value;
+    const confirmPassword = confirmInput?.value;
+    const oobCode = window._pendingOobCode;
+
+    if (!newPassword || newPassword.length < 6) {
+        shakeModal();
+        dispatchNotification("Password must be at least 6 characters.", "error");
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        shakeModal();
+        dispatchNotification("Passwords do not match. Please try again.", "error");
+        if (confirmInput) {
+            confirmInput.value = '';
+            confirmInput.focus();
+        }
+        return;
+    }
+
+    if (!oobCode) {
+        dispatchNotification("Invalid or expired reset link. Please request a new one.", "error");
+        return;
+    }
+
+    handleUpdatePassword(newPassword, oobCode);
+}
+
+/**
+ * handleUpdatePassword — The actual Firebase call to update the password.
+ */
+export async function handleUpdatePassword(newPassword, oobCode) {
+    const saveBtn = document.getElementById('update-password-btn');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerText = "Saving...";
+    }
+
+    try {
+        await confirmPasswordReset(auth, oobCode, newPassword);
+        
+        dispatchNotification("Password updated successfully! You can now log in.", "success");
+        
+        // Clean up URL parameters
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Reset view and close modal (or go to login)
+        dispatchSetAuthView('login');
+        
+        // Clear the pending code
+        delete window._pendingOobCode;
+
+    } catch (error) {
+        console.error("Auth: Password Update Error", error.code);
+        shakeModal();
+        let msg = "Failed to update password. The link may have expired.";
+        if (error.code === 'auth/weak-password') msg = "Password is too weak.";
+        if (error.code === 'auth/invalid-action-code' || error.code === 'auth/expired-action-code') {
+            msg = "Your reset link has expired or has already been used. Please request a new one.";
+        }
+        dispatchNotification(msg, "error");
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerText = "Save New Password";
+        }
+    }
+}
+
+/**
+ * Handle Password Reset (UI helper for explicit Send button in Reset View)
  */
 export async function handlePasswordReset(email) {
     if (!email) {
-        shakeModal();
-        showToast("Please enter your email address.");
+        dispatchNotification("Please enter your email.");
         return;
     }
-    
-    try {
-        await sendPasswordResetEmail(auth, email);
-        showToast("Reset link sent! Check your inbox.");
-        toggleAuthMode('login'); // Switch back to login after sending
-    } catch (error) {
-        shakeModal();
-        showToast(error.message);
-        throw error;
-    }
+    await _performPasswordReset(email);
 }
 
 /**
@@ -450,9 +715,7 @@ export function toggleAuthMode(forceMode = null) {
     const existsView = document.getElementById('account-exists-view');
     
     // Ensure we are in main view and header is visible
-    mainView.classList.remove('hidden');
-    resetView.classList.add('hidden');
-    if (existsView) existsView.classList.add('hidden');
+    dispatchSetAuthView('login');
     if (title) title.style.display = 'block';
     if (subtitle) subtitle.style.display = 'block';
 
@@ -486,26 +749,11 @@ export function toggleAuthMode(forceMode = null) {
 }
 
 export function showResetMode() {
-    authMode = 'reset';
-    const title = document.getElementById('auth-title');
-    const subtitle = document.getElementById('auth-subtitle');
-    const mainView = document.getElementById('auth-main-view');
-    const resetView = document.getElementById('reset-password-view');
-    const existsView = document.getElementById('account-exists-view');
-
-    title.innerText = "Reset Password";
-    subtitle.innerText = "Enter your email address and we'll send you a link to reset your password.";
-    
-    if (title) title.style.display = 'block';
-    if (subtitle) subtitle.style.display = 'block';
-    
-    mainView.classList.add('hidden');
-    resetView.classList.remove('hidden');
-    if (existsView) existsView.classList.add('hidden');
+    dispatchSetAuthView('reset');
 }
 
 export function showLoginMode() {
-    toggleAuthMode('signup'); // This will flip it to 'login'
+    dispatchSetAuthView('login');
 }
 
 /**
@@ -525,11 +773,50 @@ export function closeFearPopup() {
     sessionStorage.setItem('hasSeenLoginHook', 'true');
 }
 
+/**
+ * handlePasswordResetNext — Transition from email input to confirmation.
+ */
+export function handlePasswordResetNext() {
+    const email = document.getElementById('reset-email').value;
+    if (!email || !email.includes('@')) {
+        shakeModal();
+        dispatchNotification("Please enter a valid email address.", "error");
+        return;
+    }
+    dispatchSetAuthView('reset-confirm');
+}
+
+/**
+ * Confirm Modal Helpers
+ */
+export function openConfirmModal(title, text, onConfirm) {
+    const modal = document.getElementById('general-confirm-modal');
+    const titleEl = document.getElementById('confirm-modal-title');
+    const textEl = document.getElementById('confirm-modal-text');
+    const yesBtn = document.getElementById('confirm-modal-yes');
+
+    if (titleEl) titleEl.innerText = title;
+    if (textEl) textEl.innerText = text;
+
+    // Set up confirmation action
+    yesBtn.onclick = () => {
+        onConfirm();
+        closeConfirmModal();
+    };
+
+    modal.classList.remove('hidden');
+}
+
+export function closeConfirmModal() {
+    document.getElementById('general-confirm-modal').classList.add('hidden');
+}
+
 // Expose to window for inline HTML handlers
 window.auth = {
     openAuthModal,
     closeAuthModal,
     toggleAuthMode,
+    handleForgotPassword,
     handleAuthSubmit: async () => {
         try {
             const email = document.getElementById('auth-email').value;
@@ -546,22 +833,20 @@ window.auth = {
             }
         } catch (error) {
             console.error("Auth Submit Error:", error);
-            // Error is already handled inside handleLogin/handleSignup via showToast
         }
     },
     handlePasswordResetClick: async () => {
-        if (!auth) {
-            showToast("Firebase is not initialized. Please check your environment variables.");
-            return;
-        }
         const email = document.getElementById('reset-email').value;
-        await handlePasswordReset(email);
+        await _performPasswordReset(email);
     },
+    handlePasswordResetNext,
     showResetMode,
     showLoginMode,
     handleLogout,
+    closeConfirmModal,
     closeFearPopup,
-    syncAuthStateUI, // Exported for the Router
+    syncAuthStateUI,
     switchToLoginFromExists,
-    switchToSignupFromExists
+    switchToSignupFromExists,
+    handleUpdatePasswordAction: () => handleUpdatePasswordAction()
 };

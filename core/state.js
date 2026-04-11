@@ -39,6 +39,7 @@ const globalState = {
     profile: null,       // { firstName, lastName, email, ... }
     isGuest: true,       // Derived: true if uid is null
     isLoading: false,    // True while initial cloud sync is in progress
+    authView: 'login'    // active view in auth modal ('login', 'signup', 'reset')
 };
 
 // ─────────────────────────────────────────────
@@ -53,14 +54,37 @@ let _subscribers = {}; // { 'eventName': [callback, ...] }  ← 'let' for reset 
  * Subscribe a callback to a named event channel.
  * @param {string} event - e.g. 'logsUpdated', 'profileUpdated', 'stateReady'
  * @param {Function} callback - Receives the relevant state slice as argument
- * @returns {Function} Unsubscribe handle — call it to clean up on component destroy
+ * @param {Object} [options] - subscription options
+ * @param {boolean} [options.persistent] - If true, this listener survives _resetSubscribers (System Level)
+ * @returns {Function} Unsubscribe handle
  */
-export function subscribe(event, callback) {
+export function subscribe(event, callback, options = {}) {
     if (!_subscribers[event]) _subscribers[event] = [];
+    
+    // Tag the callback for internal filtering
+    if (options.persistent) {
+        callback._isPersistent = true;
+    }
+    
     _subscribers[event].push(callback);
     return () => {
-        _subscribers[event] = _subscribers[event].filter(cb => cb !== callback);
+        if (_subscribers[event]) {
+            _subscribers[event] = _subscribers[event].filter(cb => cb !== callback);
+        }
     };
+}
+
+/**
+ * dispatchNotification — Centralized messaging system.
+ * Allows any module to trigger a UI notification (Toast) via the Brain.
+ * @param {string} message 
+ * @param {string} type - 'info', 'success', 'error'
+ */
+export function dispatchNotification(message, type = 'info') {
+    // We don't necessarily need to store this in globalState if it's ephemeral,
+    // but the notify system expects state-derived data.
+    // For ephemeral events, we pass the data directly through notify.
+    _notifyEphemeral('notification', { message, type });
 }
 
 /**
@@ -74,8 +98,28 @@ export function subscribe(event, callback) {
  * tab switches (correct). They are purged only on full auth re-boot (correct).
  */
 function _resetSubscribers() {
-    _subscribers = {};
-    console.log('State: Subscription registry cleared for new auth session.');
+    const newSubscribers = {};
+    
+    // Preserve persistent (System level) listeners
+    Object.keys(_subscribers).forEach(event => {
+        const persistentListeners = _subscribers[event].filter(cb => cb._isPersistent);
+        if (persistentListeners.length > 0) {
+            newSubscribers[event] = persistentListeners;
+        }
+    });
+
+    _subscribers = newSubscribers;
+    console.log('State: Non-persistent (feature level) subscriptions cleared.');
+}
+
+/**
+ * Update the active view in the Auth Modal.
+ * Supports: 'login', 'signup', 'reset', 'reset-confirm', 'reset-success', 'exists', 'update-password', 'reset-error'
+ * @param {string} view 
+ */
+export function dispatchSetAuthView(view) {
+    globalState.authView = view;
+    notify('authViewUpdated');
 }
 
 /**
@@ -85,12 +129,23 @@ function _resetSubscribers() {
  * preventing subscriber callbacks from mutating globalState via object reference.
  * @param {string} event
  */
-function notify(event) {
+function notify(event, data = null) {
     if (!_subscribers[event]) return;
-    const payload = _buildPayload(event);
+    const payload = data || _buildPayload(event);
     _subscribers[event].forEach(cb => {
         try { cb(payload); }
         catch (e) { console.error(`State: subscriber error on '${event}':`, e); }
+    });
+}
+
+/**
+ * Internal helper to notify with a direct payload (for ephemeral syncs/toasts).
+ */
+function _notifyEphemeral(event, payload) {
+    if (!_subscribers[event]) return;
+    _subscribers[event].forEach(cb => {
+        try { cb(payload); }
+        catch (e) { console.error(`State: ephemeral subscriber error on '${event}':`, e); }
     });
 }
 
@@ -107,9 +162,12 @@ function _buildPayload(event) {
                 isGuest: globalState.isGuest,
                 logs: structuredClone(globalState.logs),
                 profile: globalState.profile ? structuredClone(globalState.profile) : null,
+                authView: globalState.authView
             };
         case 'authChanged':
             return { uid: globalState.uid, isGuest: globalState.isGuest };
+        case 'authViewUpdated':
+            return { authView: globalState.authView };
         default:
             return {};
     }

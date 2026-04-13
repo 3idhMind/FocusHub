@@ -357,13 +357,6 @@ export async function handleSignup(email, password, confirmPassword, firstName, 
             marketingConsent
         });
         
-        // Phase 4.2: Secure Contact Sync (Background — production only)
-        // On localhost, /api/sync-contact is not served by Vite, so we skip it.
-        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            syncToBrevo(email, firstName, lastName);
-        } else {
-            console.log('Dev: Brevo sync skipped on localhost (runs only in production).');
-        }
 
         console.log("Signup process complete.");
         closeAuthModal();
@@ -621,40 +614,6 @@ export async function handlePasswordReset(email) {
         return;
     }
     await _performPasswordReset(email);
-}
-
-/**
- * Background sync to Brevo via BFF Proxy
- */
-async function syncToBrevo(email, firstName, lastName) {
-    try {
-        if (!auth || !auth.currentUser) {
-            console.warn("Brevo Sync Warning: No authenticated user to authorize sync.");
-            return;
-        }
-        
-        // Retrieve valid Firebase ID token to authorize serverless function
-        const idToken = await auth.currentUser.getIdToken(true);
-
-        // Silent background fetch to our Vercel Serverless Function
-        const response = await fetch('/api/sync-contact', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${idToken}`
-            },
-            body: JSON.stringify({ email, firstName, lastName })
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.warn("Brevo Sync Warning: Failed to sync contact.", errorData);
-        } else {
-            console.log("Brevo Sync Success: User added to mailing list.");
-        }
-    } catch (err) {
-        console.error("Brevo Sync Error (Network or Token):", err);
-    }
 }
 
 /**

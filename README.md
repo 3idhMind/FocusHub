@@ -1,119 +1,142 @@
-# 🚀 FocusHub
-
-> **The Ultimate 365-Day Consistency Tracker & Student Productivity Hub.**  
-> *A product by 3idhmind*  
-> 🌐 **Live at:** [focushub.3idhmind.in](https://focushub.3idhmind.in)
-
-[![Open Source Love](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/3idhmind/Focus)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?logo=vercel)](https://vercel.com)
-[![Firebase](https://img.shields.io/badge/Powered%20by-Firebase-orange?logo=firebase)](https://firebase.google.com)
-
-**FocusHub** is a minimalist, high-performance web application designed to help individuals build unbreakable daily habits. By utilizing a pure, visual 365-day streak map, personal notebook, and advanced client-side caching, it eliminates feature bloat to trigger raw psychological accountability and long-term consistency.
+<div align="center">
+  <h1>🚀 FocusHub</h1>
+  <p><strong>The Ultimate 365-Day Consistency Tracker & Student Productivity Hub.</strong></p>
+  <p><em>An open-source, lightweight, and fast academic management tool helping students consolidate their 365-day tracking, syllabus management, and notes in one unified interface.</em></p>
+  
+  [![Version](https://img.shields.io/badge/version-v1.1.0-blue.svg)](https://github.com/3idhmind/Focus)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Vite](https://img.shields.io/badge/Vite-B73BFE?logo=vite&logoColor=white)](https://vitejs.dev/)
+  [![Firebase](https://img.shields.io/badge/Powered%20by-Firebase-orange?logo=firebase)](https://firebase.google.com)
+  [![Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?logo=vercel)](https://vercel.com)
+  
+  🌐 **Live at:** [focushub.3idhmind.in](https://focushub.3idhmind.in)
+</div>
 
 ---
 
-## ✨ Core Features
+## 📖 Introduction
 
-### 📅 The 365-Day Visual Tracker
-A high-density, interactive horizontal map of your entire year. 
-- Tick off your wins, cross out your misses, and see your consistency at a glance.
-- Built with a **Hyper-Fast DOM Scheduler** that guarantees perfectly constrained CSS grid layouts regardless of when months start.
-- Deeply integrated Diary system allowing you to pin contextual notes to specific dates.
+**FocusHub** is a minimalist, high-performance web application designed to help individuals build unbreakable daily habits. By utilizing a pure, visual 365-day streak map, personal notebook, and advanced client-side caching, it eliminates feature bloat to trigger raw psychological accountability and long-term consistency. 
 
-### 📝 Integrated Journal & Notes
-Your personal knowledge base. View all your written Daily Notes in a centralized repository, fully synchronized with the 365-Day Tracker.
+With its bespoke **State-Driven Architecture** and vanilla JavaScript foundation, FocusHub removes layers of abstraction found in modern frameworks to deliver a blazingly fast, raw, and hyper-responsive user experience.
 
-### ♻️ Secure Trash & Recovery
-A fully integrated soft-deletion system. Accidental deletions live in a dedicated recovery vault where they can be permanently wiped or instantly restored to your main Tracker.
+---
 
-### ⚡ Performance & Caching Engine (Zero Limits)
-Built with an advanced **Hide-and-Show SPA Router** and a centralized `IN_MEMORY_CACHE`:
+## 🛠️ Tech Stack
+
+Built from the ground up for speed, modularity, and database quota preservation:
+
+- **Core**: Vanilla JavaScript (ES6+), HTML5, CSS3.
+- **Styling**: Custom CSS with an emphasis on **Glassmorphism UI** and perfectly constrained grid layouts.
+- **Build Tool**: Vite (for lightning-fast HMR and optimized production bundling).
+- **Database & Auth**: Firebase Engine (Firestore NoSQL, Firebase Authentication).
+- **Routing**: Custom Client-side Hash Router implementing an advanced Hide-and-Show SPA paradigm.
+- **Hosting**: Vercel.
+
+---
+
+## 🏗️ System Architecture
+
+FocusHub operates on a deeply modular Single Page Application (SPA) framework prioritizing security, speed, and zero latency.
+
 - **Phantom Write Protection**: Intercepts and blocks duplicate network requests to drastically cut down database quota usage.
-- **Instant Reactive Navigation**: Modules don't re-render heavily; they persist and hydrate instantly.
-
-### 🔐 Security & Email Automation 
-- **Firebase Auth**: Industry-leading security with seamless Email/Password functionality.
-- **Backend-For-Frontend (BFF) Proxy**: Sensitive API communications (like Marketing and SMTP Relays) run through isolated Vercel Serverless Functions.
-- **Brevo API v3 Integration**: Automated Contact Sync triggering rich Welcome Emails upon user signup instantly!
+- **Instant Reactive Navigation**: Modules don't re-render heavily; they persist and hydrate instantly in the DOM.
+- **Template Injection**: The custom SPA router (`core/router.js`) dynamically injects raw HTML strings using Vite's `import.meta.glob` at runtime.
 
 ---
 
-## 🏗️ Architecture & Tech Stack
+## 🧠 Data Flow & "The Brain" (`state.js`)
 
-FocusHub operates on a modern, deeply modular Single Page Application (SPA) framework prioritizing security, speed, and Firebase quota preservation.
+At the core of FocusHub lies **The Brain** (`core/state.js`) — a centralized, dependency-free state manager and pub/sub event bus. This guarantees that UI modules remain completely decoupled from the database and authentication layers.
 
-- **Frontend Environment**: Vite, Vanilla JavaScript (ES6+), HTML5, and pure CSS3 ("Graphite & Muted Gold" Design System).
-- **Backend Routing**: Vercel Serverless Functions (Node.js) handling RESTful endpoints for third-party tools.
-- **Database Layer**: Firebase Engine (Firestore NoSQL, Firebase Auth).
-- **Email Infrastructure**: Brevo Dedicated SMTP Relays.
+### How Data Flows in FocusHub:
+1. **Unidirectional Flow**: 
+   `UI Module` → `dispatchAction()` → `The Brain (globalState)` → `Notify()` → `UI Re-renders` -> `Async DB Sync`
+2. **Event Pub/Sub**: Modules simply subscribe to channels like `logsUpdated` or `profileUpdated`. When state changes, the Brain notifies all subscribers instantly with cloned payloads, preventing unwanted mutation.
+3. **Optimistic Updates**: When a user ticks off a day, the UI updates instantly via The Brain. The database sync happens in the background. If the sync fails, The Brain automatically rolls back the snapshot and corrects the UI seamlessly.
+4. **Hydration Engine**: Upon authentication, The Brain pulls raw payloads from Firebase, hydrates its in-memory graph, and issues an architecture-wide `stateReady` signal to initialize all UI modules cleanly.
 
 ---
 
-## 🛠️ Local Setup & Installation
+## 📂 Folder Structure
 
-Follow these steps to get FocusHub running on your local machine:
+The project strictly follows a feature-by-feature modular design. Here is the actual implementation structure:
 
-### 1. Clone the Repository
+```text
+FocusHub/
+├── api/                    # Vercel Serverless Functions
+├── core/                   # The Architecture Foundation
+│   ├── auth.js             # Custom auth logic & secure Google/Email SSO
+│   ├── db.js               # Firestore CRUD wrappers & caching logic
+│   ├── firebase-config.js  # Environment initialization
+│   ├── router.js           # Custom SPA router handling dynamic imports
+│   └── state.js            # "The Brain" - Centralized state manager
+│
+├── features/               # Independent Domain Modules
+│   ├── 365-tracker/        # 365-day visual streak map
+│   ├── dashboard/          # Hub overview
+│   ├── notes/              # Integrated diary & notebook
+│   ├── profile/            # User settings
+│   ├── syllabus/           # Academic management features
+│   └── trash/              # Secure recovery vault for soft-deletions
+│
+├── assets/                 # SVGs, Base CSS, Images, and Global Variables
+├── app.js                  # Main entry point bridging router, auth and state
+├── index.html              # Main application canvas
+└── vite.config.ts          # Build tool configuration
+```
+
+---
+
+## 💻 Local Setup & Installation
+
+Follow these platform-specific instructions to quickly clone, install, and run FocusHub on your local machine.
+
+### Prerequisites (All Platforms)
+- [Node.js](https://nodejs.org/) (v16.0 or higher recommended)
+- [Git](https://git-scm.com/)
+
+---
+
+### 🍎 macOS / 🐧 Linux / Ubuntu
+
+Open your Terminal and run the following commands:
+
 ```bash
+# 1. Clone the repository and enter the directory
 git clone https://github.com/3idhmind/Focus.git
 cd Focus
-```
 
-### 2. Install Dependencies
-```bash
+# 2. Install dependencies
 npm install
-```
 
-### 3. Environment Configuration
-Your `.gitignore` file correctly prevents environment variables from pushing publicly. 
-Create a `.env` file in the root directory and use the following template:
-
-```env
-# --- Firebase Configuration (Client-Side) ---
-# Safe for Vite to bundle into public frontend strings.
-VITE_FIREBASE_API_KEY=your_firebase_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
-VITE_FIREBASE_FIRESTORE_DATABASE_ID=(default)
-
-# --- Brevo Configuration (Server-Side Only) ---
-# Specifically kept OUT of VITE_; strictly injected into Vercel SSR functions.
-BREVO_API_KEY=your_brevo_api_v3_key
-BREVO_LIST_ID=your_target_list_id
-```
-
-### 4. Run Development Server
-**For Frontend testing only:**
-```bash
+# 3. Start the development server
 npm run dev
 ```
 
-**For Backend API / Sync-Contact testing:**
-```bash
-vercel dev
+### 🪟 Windows (Command Prompt / PowerShell)
+
+Open your Command Prompt or PowerShell and run the following commands:
+
+```cmd
+:: 1. Clone the repository and enter the directory
+git clone https://github.com/3idhmind/Focus.git
+cd Focus
+
+:: 2. Install dependencies
+npm install
+
+:: 3. Start the development server
+npm run dev
 ```
 
-The app will be available at `http://localhost:3000`.
 
----
-
-## 🚀 Deployment (Vercel)
-
-FocusHub is fully optimized out-of-the-box for **Vercel** deployments.
-
-1. **GitHub Connection**: Push to your repository and link it to your Vercel Dashboard.
-2. **Inject Variables**: Pass your `.env` keys directly into your Vercel Project Settings interface. Vercel naturally passes the non-Vite keys into the Node backend.
-3. **Build Command**: Vercel will automatically run `npm run build` via Vite, bundle your assets, and launch your `/api/` endpoints as serverless functions.
-
----
 
 ## 📄 License
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
 
 ---
 
-**Built with ❤️ by [3idhmind](https://github.com/3idhmind)**
+<div align="center">
+  <strong>Built with ❤️ by <a href="https://github.com/3idhmind">3idhmind</a></strong>
+</div>
